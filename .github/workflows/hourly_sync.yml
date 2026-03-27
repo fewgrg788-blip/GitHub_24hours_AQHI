@@ -32,6 +32,13 @@ jobs:
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
+          
+          # 先拉取远程更改，防止冲突
+          git pull --rebase origin main
+          
           git add aqhi_history.csv
+          # 如果没有变化就跳过，防止报错
           git commit -m "Auto-update hourly history: $(date)" || echo "No changes to commit"
-          git push
+          
+          # 再次推送
+          git push origin main
