@@ -1,0 +1,19 @@
+# 数据处理 (Data Processing)
+pandas
+numpy
+scikit-learn
+
+# 网页抓取 (Web Scraping)
+requests
+beautifulsoup4
+
+# 数据库通信 (Firebase)
+firebase-admin
+
+# 深度学习推理 (Deep Learning - 用于 Render)
+torch
+torch-geometric
+
+# API 服务 (Web Service - 用于 Render)
+fastapi
+uvicorn
