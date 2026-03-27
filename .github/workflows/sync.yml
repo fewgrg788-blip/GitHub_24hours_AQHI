@@ -1,0 +1,34 @@
+name: Hourly AQHI Sync
+
+on:
+  schedule:
+    - cron: '0 * * * *' # 每小时运行一次
+  workflow_dispatch:      # 允许手动运行
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: pip install pandas numpy firebase-admin requests beautifulsoup4
+
+      - name: Run Sync
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: python sync_wan_data.py
+
+      - name: Push CSV Update
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add GAGNN_Ready_Data_2013_2025.csv
+          git commit -m "Automated Data Update: $(date)" || echo "No changes"
+          git push
