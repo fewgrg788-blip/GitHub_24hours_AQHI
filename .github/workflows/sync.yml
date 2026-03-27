@@ -2,33 +2,32 @@ name: Hourly AQHI Sync
 
 on:
   schedule:
-    - cron: '0 * * * *'  # 每小时运行一次
-  workflow_dispatch:      # 允许手动随时运行
+    - cron: '0 * * * *'
+  workflow_dispatch:
 
-# 必须添加权限，否则 git push 会失败
 permissions:
   contents: write
 
 jobs:
   sync:
     runs-on: ubuntu-latest
+    # 解决 Node.js 20 弃用警告
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4 # 使用最新版 checkout
+        uses: actions/checkout@v4
         with:
-          fetch-depth: 0         # 获取完整历史，确保 push 顺畅
+          fetch-depth: 0
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5 # 升级到 v5 支持更高版本的环境
         with:
-          python-version: '3.9'
+          python-version: '3.10'
 
       - name: Install dependencies
-        run: |
-          pip install -r requirements.txt
-          # 如果你的脚本里用了 playwright，请取消下面两行的注释
-          # playwright install chromium
-          # playwright install-deps
+        run: pip install -r requirements.txt
 
       - name: Run Sync Script
         env:
@@ -39,16 +38,10 @@ jobs:
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          
-          # 先拉取远程更改，防止冲突
-          git pull origin main
-          
-          # 添加 CSV 文件
+          git pull origin main --rebase
           git add GAGNN_Ready_Data_2013_2025.csv
-          
-          # 检查是否有文件变动，有则提交
           if git diff --staged --quiet; then
-            echo "No changes to commit"
+            echo "No changes"
           else
             git commit -m "Automated Data Update: $(date)"
             git push origin main
