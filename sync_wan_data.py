@@ -1,6 +1,7 @@
 import firebase_admin
 from firebase_admin import credentials, db
 import requests
+import re
 from datetime import datetime
 import os
 import json
@@ -9,60 +10,67 @@ FIREBASE_URL = "https://project-12cc8-default-rtdb.asia-southeast1.firebasedatab
 ROOT_NODE = "GAGNN_24hours"
 DATA_NODE = "GAGNN_data"
 
-def fetch_hk_aqhi_api():
-    """直接从环保署的 JSON 接口获取数据，跳过 HTML 解析"""
-    # 这是环保署官网 JS 调用的真实数据接口
+def fetch_aqhi_by_regex():
+    """使用正则表达式直接从 JS 内容中提取数据"""
     api_url = "https://www.aqhi.gov.hk/js/data/aqhi_data.js"
     try:
         res = requests.get(api_url, timeout=15)
-        # 该接口返回的是 JS 变量赋值语句，我们需要提取里面的 JSON 部分
-        # 格式通常是: var aqhi_data = [...];
         content = res.text
-        json_str = content[content.find('['):content.rfind(']')+1]
-        data_list = json.loads(json_str)
         
+        # 匹配模式：寻找 "station_en":"站名" 和 "aqhi":"数字"
+        # 正则逻辑：抓取 station_en 后的字符串和 aqhi 后的数字
+        stations = re.findall(r'"station_en":"([^"]+)"', content)
+        values = re.findall(r'"aqhi":"([^"]+)"', content)
+        
+        if not stations or not values:
+            print("⚠️ 正则匹配未找到数据，尝试备用匹配模式...")
+            # 备用：匹配非引号包围的数值
+            values = re.findall(r'"aqhi":([\d\+]+)', content)
+
         aqhi_dict = {}
-        for item in data_list:
-            # 接口字段映射：station_en 是站名，aqhi 是数值
-            station = item.get('station_en', '').replace('/', '_').replace(' ', '_')
-            value = item.get('aqhi', 'N/A')
-            if station and value != 'N/A':
-                aqhi_dict[station] = value
-                
+        # 配对提取
+        for s, v in zip(stations, values):
+            # 过滤掉非数字的 AQHI (比如 'N/A')
+            if v.isdigit() or (v.endswith('+') and v[:-1].isdigit()):
+                clean_name = s.replace('/', '_').replace(' ', '_')
+                aqhi_dict[clean_name] = v
+        
         return aqhi_dict
     except Exception as e:
-        print(f"❌ API 抓取失败: {e}")
+        print(f"❌ 正则提取失败: {e}")
         return None
 
 def run_sync():
     print(f"--- 任务启动: {datetime.now()} ---")
     
     creds_json = os.getenv("FIREBASE_SERVICE_ACCOUNT")
-    if not creds_json: return
+    if not creds_json:
+        print("❌ 找不到环境变量")
+        return
 
     try:
-        # 1. 初始化 Firebase
         if not firebase_admin._apps:
             cred = credentials.Certificate(json.loads(creds_json))
             firebase_admin.initialize_app(cred, {'databaseURL': FIREBASE_URL})
         
-        # 2. 获取数据 (改用 API 方式)
-        aqhi_results = fetch_hk_aqhi_api()
+        # 使用正则方式获取数据
+        aqhi_results = fetch_aqhi_by_regex()
         
         ref = db.reference(f"{ROOT_NODE}/{DATA_NODE}")
         
-        if aqhi_results:
+        if aqhi_results and len(aqhi_results) > 0:
             payload = {
                 "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "aqhi_readings": aqhi_results,
                 "status": "online",
-                "method": "API_JS_Source"
+                "method": "Regex_Extraction"
             }
             ref.set(payload)
-            print(f"🚀 [SUCCESS] 成功从 API 同步了 {len(aqhi_results)} 个站点数据！")
+            print(f"🚀 [SUCCESS] 正则匹配成功！同步了 {len(aqhi_results)} 个站点。")
+            print(f"预览: {list(aqhi_results.items())[:5]}")
         else:
-            print("⚠️ 未能获取到数据。")
-            ref.update({"status": "api_fetch_failed"})
+            print("⚠️ 匹配结果为空。")
+            ref.update({"status": "regex_empty", "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
 
     except Exception as e:
         print(f"❌ 运行异常: {e}")
