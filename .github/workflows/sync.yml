@@ -2,15 +2,21 @@ name: Hourly AQHI Sync
 
 on:
   schedule:
-    - cron: '0 * * * *' # 每小时运行一次
-  workflow_dispatch:      # 允许手动运行
+    - cron: '0 * * * *'  # 每小时运行一次
+  workflow_dispatch:      # 允许手动随时运行
+
+# 必须添加权限，否则 git push 会失败
+permissions:
+  contents: write
 
 jobs:
-  build:
+  sync:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4 # 使用最新版 checkout
+        with:
+          fetch-depth: 0         # 获取完整历史，确保 push 顺畅
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -18,17 +24,32 @@ jobs:
           python-version: '3.9'
 
       - name: Install dependencies
-        run: pip install pandas numpy firebase-admin requests beautifulsoup4
+        run: |
+          pip install -r requirements.txt
+          # 如果你的脚本里用了 playwright，请取消下面两行的注释
+          # playwright install chromium
+          # playwright install-deps
 
-      - name: Run Sync
+      - name: Run Sync Script
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
         run: python sync_wan_data.py
 
-      - name: Push CSV Update
+      - name: Commit and Push CSV Update
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
+          
+          # 先拉取远程更改，防止冲突
+          git pull origin main
+          
+          # 添加 CSV 文件
           git add GAGNN_Ready_Data_2013_2025.csv
-          git commit -m "Automated Data Update: $(date)" || echo "No changes"
-          git push
+          
+          # 检查是否有文件变动，有则提交
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Automated Data Update: $(date)"
+            git push origin main
+          fi
