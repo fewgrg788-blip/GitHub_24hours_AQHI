@@ -13,7 +13,7 @@ ROOT_NODE = "GAGNN_24hours"
 DATA_NODE = "GAGNN_data"
 
 def fetch_official_aqhi_xml():
-    """从官方 XML 获取 AQHI 数据（改进版）"""
+    """改进版：更稳健地从官方 XML 提取 AQHI"""
     api_url = "https://www.aqhi.gov.hk/epd/ddata/html/out/aqhi_ind_rss_Eng.xml"
     
     try:
@@ -24,40 +24,48 @@ def fetch_official_aqhi_xml():
         root = ET.fromstring(res.content)
         aqhi_dict = {}
         
-        # 提取更新时间
+        # 更新时间
         pub_date = root.find(".//pubDate")
-        source_time = pub_date.text if pub_date is not None else None
+        source_time = pub_date.text if pub_date is not None else datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
-        # 遍历所有 item
         for item in root.findall(".//item"):
             title = item.find("title")
             description = item.find("description")
             
-            if title is not None and description is not None:
-                station = title.text.strip() if title.text else ""
-                desc_text = description.text.strip() if description.text else ""
+            if not title or not description or not title.text or not description.text:
+                continue
                 
-                # 从 description 中提取 AQHI 数值（支持 1-10 或 10+）
-                aqhi_match = re.search(r':\s*(\d+\+?)\s', desc_text)
-                if aqhi_match:
-                    aqhi_val = aqhi_match.group(1)
-                    
-                    # 清洗站名（适合 Firebase Key）
-                    clean_station = station.replace('/', '_').replace(' ', '_').replace('(', '').replace(')', '').replace(',', '_')
-                    
-                    # 区分 General / Roadside（可选更精确）
-                    if "Roadside" in desc_text:
-                        clean_station += "_Roadside"
-                    elif "General" in desc_text:
-                        clean_station += "_General"
-                    
-                    aqhi_dict[clean_station] = aqhi_val
+            station = title.text.strip()
+            desc = description.text.strip()
+            
+            # 改进正则：更宽松匹配 AQHI 数值（支持 1-10 或 10+）
+            match = re.search(r':\s*(\d{1,2}\+?)\s', desc)
+            if not match:
+                match = re.search(r'(\d{1,2}\+?)\s+(Low|Moderate|High|Very High)', desc)  # 备用匹配
+            
+            if match:
+                aqhi_val = match.group(1)
+                
+                # 清洗站名（Firebase Key 友好）
+                clean_station = re.sub(r'[^a-zA-Z0-9_]', '_', station)
+                clean_station = re.sub(r'_+', '_', clean_station).strip('_')
+                
+                # 可选：区分 General / Roadside
+                if "Roadside" in desc:
+                    clean_station += "_Roadside"
+                else:
+                    clean_station += "_General"
+                
+                aqhi_dict[clean_station] = aqhi_val
         
         print(f"成功解析 {len(aqhi_dict)} 个监测站")
+        if aqhi_dict:
+            print("数据预览:", dict(list(aqhi_dict.items())[:5]))
+        
         return aqhi_dict, source_time
         
     except Exception as e:
-        print(f"❌ 官方 XML 调用失败: {e}")
+        print(f"❌ XML 获取失败: {e}")
         return None, None
 
 
@@ -70,30 +78,27 @@ def run_sync():
         return
     
     try:
-        # 初始化 Firebase
         if not firebase_admin._apps:
             cred = credentials.Certificate(json.loads(creds_json))
             firebase_admin.initialize_app(cred, {'databaseURL': FIREBASE_URL})
         
-        # 获取数据
         aqhi_results, source_time = fetch_official_aqhi_xml()
         
         ref = db.reference(f"{ROOT_NODE}/{DATA_NODE}")
         
-        if aqhi_results and len(aqhi_results) >= 10:   # 正常应有 15-18 个左右
+        if aqhi_results and len(aqhi_results) >= 10:
             payload = {
                 "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "source_last_updated": source_time,
                 "aqhi_readings": aqhi_results,
                 "status": "online",
-                "method": "Official_XML_Eng_Improved"
+                "method": "Official_XML_Eng_Fixed"
             }
             ref.set(payload)
             print(f"🚀 [SUCCESS] 同步成功！共 {len(aqhi_results)} 个站点。")
-            print(f"数据预览: {list(aqhi_results.items())[:6]}")
         else:
-            print(f"⚠️ 数据不足，仅解析到 {len(aqhi_results) if aqhi_results else 0} 个站点。")
-            ref.update({"status": "xml_insufficient", "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
+            print(f"⚠️ 数据不足，仅获取到 {len(aqhi_results) if aqhi_results else 0} 个站点")
+            ref.update({"status": "data_insufficient", "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
             
     except Exception as e:
         print(f"❌ 运行异常: {e}")
