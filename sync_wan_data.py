@@ -7,6 +7,11 @@ import os
 import pandas as pd
 from datetime import datetime
 import json
+from datetime import datetime, timedelta, timezone
+
+# 强制使用 HKT (UTC+8)
+hkt = timezone(timedelta(hours=8))
+timestamp = datetime.now(hkt).strftime("%Y-%m-%d %H:%M")
 
 # --- 配置 ---
 FIREBASE_URL = "https://project-12cc8-default-rtdb.asia-southeast1.firebasedatabase.app/"
