@@ -1,0 +1,37 @@
+name: ⏱️ Hourly Realtime Sync
+
+on:
+  schedule:
+    - cron: "0 * * * *"  # 每小时的第 0 分钟运行 (例如 14:00, 15:00)
+  workflow_dispatch:      # 允许你在 GitHub 网页上手动点击运行按钮
+
+permissions:
+  contents: write         # 允许 Action 修改仓库文件并 Commit
+
+jobs:
+  realtime-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🐍 Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: 📦 Install dependencies
+        run: pip install firebase-admin requests pandas
+
+      - name: 🚀 Run Hourly Sync Script
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: python sync_wan_data.py
+
+      - name: 💾 Commit and Push history CSV
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add aqhi_history.csv
+          git commit -m "Auto-update hourly history: $(date)" || echo "No changes to commit"
+          git push
