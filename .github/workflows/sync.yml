@@ -2,44 +2,36 @@ name: Hourly AQHI Sync
 
 on:
   schedule:
-    - cron: '0 * * * *'     # 每小时整点运行
-  workflow_dispatch:
+    - cron: "0 * * * *"  # 每小时第 0 分钟运行
+  workflow_dispatch:      # 允许手动触发
 
 permissions:
-  contents: write
+  contents: write         # 关键：允许写入仓库文件
 
 jobs:
-  sync:
+  build:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v4
         with:
-          python-version: '3.11'     # 建议升级到 3.11 或 3.12
+          python-version: '3.9'
 
       - name: Install dependencies
-        run: |
-          pip install -r requirements.txt
+        run: pip install firebase-admin requests pandas
 
       - name: Run Sync Script
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
         run: python sync_wan_data.py
 
-      # 如果你以后需要提交 CSV，可以保留下面这部分
-      - name: Commit and Push Changes
+      - name: Commit and Push CSV
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git pull origin main --rebase || true
-          git add GAGNN_Ready_Data_2013_2025.csv 2>/dev/null || true
-          if git diff --staged --quiet; then
-            echo "No changes to commit"
-          else
-            git commit -m "Automated AQHI Update: $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
-            git push origin main
-          fi
+          git add aqhi_history.csv
+          git commit -m "Auto-update AQHI history: $(date)" || echo "No changes"
+          git push
