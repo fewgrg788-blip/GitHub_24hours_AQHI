@@ -1,69 +1,68 @@
-import pandas as pd
 import firebase_admin
 from firebase_admin import credentials, db
 import requests
-from bs4 import BeautifulSoup
 from datetime import datetime
 import os
 import json
 
-# --- 配置 ---
 FIREBASE_URL = "https://project-12cc8-default-rtdb.asia-southeast1.firebasedatabase.app/"
 ROOT_NODE = "GAGNN_24hours"
 DATA_NODE = "GAGNN_data"
 
-def scrape_real_aqhi():
-    """抓取香港环保署数据，增加异常处理"""
-    url = "https://www.aqhi.gov.hk/en/aqhi/past-24-hours-aqhi.html?mid=0"
-    headers = {'User-Agent': 'Mozilla/5.0'}
+def fetch_hk_aqhi_api():
+    """直接从环保署的 JSON 接口获取数据，跳过 HTML 解析"""
+    # 这是环保署官网 JS 调用的真实数据接口
+    api_url = "https://www.aqhi.gov.hk/js/data/aqhi_data.js"
     try:
-        res = requests.get(url, headers=headers, timeout=15)
-        soup = BeautifulSoup(res.text, 'html.parser')
-        # 寻找数据表
-        table = soup.find('table', {'class': 'tblPast24hAQHI'})
-        if not table: return None
+        res = requests.get(api_url, timeout=15)
+        # 该接口返回的是 JS 变量赋值语句，我们需要提取里面的 JSON 部分
+        # 格式通常是: var aqhi_data = [...];
+        content = res.text
+        json_str = content[content.find('['):content.rfind(']')+1]
+        data_list = json.loads(json_str)
         
-        rows = table.find_all('tr')
-        # 提取表头（站点名）和第一行数据（最新）
-        headers_list = [th.get_text(strip=True) for th in rows[0].find_all(['th', 'td'])]
-        values_list = [td.get_text(strip=True).replace('*', '') for td in rows[1].find_all('td')]
-        
-        # 组合成字典，跳过第一列的时间
-        data = dict(zip(headers_list[1:], values_list[1:]))
-        return data
-    except:
+        aqhi_dict = {}
+        for item in data_list:
+            # 接口字段映射：station_en 是站名，aqhi 是数值
+            station = item.get('station_en', '').replace('/', '_').replace(' ', '_')
+            value = item.get('aqhi', 'N/A')
+            if station and value != 'N/A':
+                aqhi_dict[station] = value
+                
+        return aqhi_dict
+    except Exception as e:
+        print(f"❌ API 抓取失败: {e}")
         return None
 
 def run_sync():
-    print(f"--- 启动任务: {datetime.now()} ---")
+    print(f"--- 任务启动: {datetime.now()} ---")
     
-    # 1. 认证
     creds_json = os.getenv("FIREBASE_SERVICE_ACCOUNT")
     if not creds_json: return
-    
+
     try:
+        # 1. 初始化 Firebase
         if not firebase_admin._apps:
             cred = credentials.Certificate(json.loads(creds_json))
             firebase_admin.initialize_app(cred, {'databaseURL': FIREBASE_URL})
         
-        # 2. 抓取真实数据
-        aqhi_results = scrape_real_aqhi()
+        # 2. 获取数据 (改用 API 方式)
+        aqhi_results = fetch_hk_aqhi_api()
         
-        # 3. 写入 Firebase
         ref = db.reference(f"{ROOT_NODE}/{DATA_NODE}")
         
         if aqhi_results:
             payload = {
                 "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "aqhi_readings": aqhi_results,
-                "status": "online"
+                "status": "online",
+                "method": "API_JS_Source"
             }
             ref.set(payload)
-            print("🚀 [SUCCESS] 实时 AQHI 数据已同步到 Firebase！")
+            print(f"🚀 [SUCCESS] 成功从 API 同步了 {len(aqhi_results)} 个站点数据！")
         else:
-            # 如果抓取失败，至少更新心跳状态
-            ref.update({"status": "scrape_failed", "last_attempt": datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
-            print("⚠️ 抓取失败，已更新 Firebase 状态。")
+            print("⚠️ 未能获取到数据。")
+            ref.update({"status": "api_fetch_failed"})
 
     except Exception as e:
         print(f"❌ 运行异常: {e}")
