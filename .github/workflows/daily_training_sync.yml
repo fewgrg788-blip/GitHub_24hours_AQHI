@@ -1,0 +1,38 @@
+name: 📊 Daily Model Data Upgrade
+
+on:
+  schedule:
+    # 注意时区：GitHub Action 服务器默认使用 UTC 时间。
+    # 香港时间 (HKT) 是 UTC+8。
+    # 每天 HKT 23:50 运行 = UTC 15:50
+    - cron: "50 15 * * *" 
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  daily-upgrade:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🐍 Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: 📦 Install dependencies
+        run: pip install requests pandas
+
+      - name: 🚀 Run Daily Feature Extraction
+        run: python sync_full_data.py
+        
+      - name: 💾 Commit and Push Master Dataset
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add GAGNN_Ready_Data_2013_2025.csv
+          git commit -m "Auto-append daily training features: $(date)" || echo "No changes to commit"
+          git push
