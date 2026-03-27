@@ -2,7 +2,7 @@ name: Hourly AQHI Sync
 
 on:
   schedule:
-    - cron: '0 * * * *'
+    - cron: '0 * * * *'     # 每小时整点运行
   workflow_dispatch:
 
 permissions:
@@ -11,21 +11,15 @@ permissions:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    
-    # 核心修正：添加环境变量来强制使用 Node.js 24，消除弃用警告
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.11'     # 建议升级到 3.11 或 3.12
 
       - name: Install dependencies
         run: |
@@ -36,15 +30,16 @@ jobs:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
         run: python sync_wan_data.py
 
-      - name: Commit and Push CSV Update
+      # 如果你以后需要提交 CSV，可以保留下面这部分
+      - name: Commit and Push Changes
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git pull origin main --rebase
-          git add GAGNN_Ready_Data_2013_2025.csv
+          git pull origin main --rebase || true
+          git add GAGNN_Ready_Data_2013_2025.csv 2>/dev/null || true
           if git diff --staged --quiet; then
-            echo "No changes"
+            echo "No changes to commit"
           else
-            git commit -m "Automated Data Update: $(date)"
+            git commit -m "Automated AQHI Update: $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
             git push origin main
           fi
