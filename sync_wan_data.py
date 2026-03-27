@@ -8,77 +8,76 @@ from datetime import datetime
 import os
 import json
 
-# --- 1. 初始化 Firebase ---
-# 从环境变量读取 Secret (由 GitHub Action 提供)
+# --- 1. 初始化 Firebase (使用你的新 URL) ---
+FIREBASE_URL = "https://project-12cc8-default-rtdb.asia-southeast1.firebasedatabase.app"
+device_id = "56214328"
+
+# 从 GitHub Secret 读取认证信息
 firebase_key_raw = os.getenv("FIREBASE_SERVICE_ACCOUNT")
 if firebase_key_raw:
-    key_dict = json.loads(firebase_key_raw)
-    cred = credentials.Certificate(key_dict)
+    cred = credentials.Certificate(json.loads(firebase_key_raw))
 else:
-    # 本地测试逻辑
+    # 本地测试请确保有此文件
     cred = credentials.Certificate("serviceAccountKey.json")
 
 if not firebase_admin._apps:
     firebase_admin.initialize_app(cred, {
-        'databaseURL': 'https://project-12cc8-default-rtdb.firebaseio.com/'
+        'databaseURL': FIREBASE_URL
     })
 
-def scrape_hk_official_aqhi():
-    """解析香港环保署官网 18 站点的实时 AQHI"""
+def scrape_official_aqhi():
+    """抓取官网当前 18 个站点的最新数据"""
     url = "https://www.aqhi.gov.hk/en/aqhi/past-24-hours-aqhi.html?mid=0"
     try:
-        response = requests.get(url, timeout=15)
-        soup = BeautifulSoup(response.text, 'html.parser')
+        res = requests.get(url, timeout=15)
+        soup = BeautifulSoup(res.text, 'html.parser')
         table = soup.find('table', {'class': 'tblPast24hAQHI'})
         
-        # 获取所有站点名称（表头）
+        # 获取表头 (站点名)
         headers = [th.get_text(strip=True) for th in table.find_all('th')][1:]
-        
-        # 获取最新一行数据（通常是第一行数据行）
+        # 获取最新一行数据
         latest_row = table.find_all('tr')[1] 
         values = [td.get_text(strip=True).replace('*', '') for td in latest_row.find_all('td')][1:]
         
-        # 转换为浮点数处理 (处理可能存在的空值)
-        cleaned_values = []
-        for v in values:
-            try: cleaned_values.append(float(v))
-            except: cleaned_values.append(np.nan)
-            
-        return dict(zip(headers, cleaned_values))
+        return dict(zip(headers, values))
     except Exception as e:
         print(f"Scrape Error: {e}")
         return None
 
-def run_sync():
-    CSV_PATH = "GAGNN_Ready_Data_2013_2025.csv"
-    data_map = scrape_hk_official_aqhi()
-    if not data_map: return
-
+def run():
+    # A. 抓取数据
+    aqhi_data = scrape_official_aqhi()
+    if not aqhi_data: return
+    
     now_str = datetime.now().strftime("%Y-%m-%d %H:00")
 
-    # A. 更新 Firebase (用于 BuildTech_System 实时渲染)
-    ref = db.reference("BuildTech_System/WAN_GAGNN")
-    ref.update({
-        "Last_Sync": now_str,
-        "Current_AQHI": data_map
+    # B. 核心：在设备路径下更新 GAGNN_24hours 栏目
+    # 路径：56214328/GAGNN_24hours
+    ref = db.reference(f"/{device_id}/GAGNN_24hours")
+    
+    # 我们先存入当前的实测值作为基础，之后 Render 会更新预测数组
+    ref.set({
+        "last_sync": now_str,
+        "current_official_data": aqhi_data,
+        "status": "Waiting for GAGNN Inference",
+        "GAGNN_forecast": [] # 留给 Render 填入未来 24 小时预测
     })
 
-    # B. 追加到 CSV (用于模型学习)
+    # C. 追加到本地 CSV
+    CSV_PATH = "GAGNN_Ready_Data_2013_2025.csv"
     if os.path.exists(CSV_PATH):
         df = pd.read_csv(CSV_PATH)
-        new_entry = {"Date": now_str}
-        # 匹配列名追加数据
+        new_row = {"Date": now_str}
+        # 匹配 AQHI_ 列
         for col in df.columns:
             if col.startswith("AQHI_"):
                 st_name = col.replace("AQHI_", "")
-                # 模糊匹配：处理官网命名与 CSV 列名的微小差异
-                matched_val = data_map.get(st_name, np.nan)
-                new_entry[col] = matched_val
+                new_row[col] = aqhi_data.get(st_name, np.nan)
         
-        df = pd.concat([df, pd.DataFrame([new_entry])], ignore_index=True)
-        # 只保留最后 10000 行防止 CSV 过大，或保留全部
+        df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
         df.to_csv(CSV_PATH, index=False)
-        print(f"Successfully synced: {now_str}")
+
+    print(f"✅ Firebase Column '{device_id}/GAGNN_24hours' has been updated.")
 
 if __name__ == "__main__":
-    run_sync()
+    run()
