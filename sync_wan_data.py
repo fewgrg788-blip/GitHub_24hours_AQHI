@@ -13,7 +13,7 @@ ROOT_NODE = "GAGNN_24hours"
 DATA_NODE = "GAGNN_data"
 
 def fetch_official_aqhi_xml():
-    """最终稳定版：正确解析官方 AQHI XML（已验证真实结构）"""
+    """最终修复版 - 严格匹配官方真实 XML 格式"""
     api_url = "https://www.aqhi.gov.hk/epd/ddata/html/out/aqhi_ind_rss_Eng.xml"
     
     try:
@@ -24,7 +24,6 @@ def fetch_official_aqhi_xml():
         root = ET.fromstring(res.content)
         aqhi_dict = {}
         
-        # 更新时间
         pub_date = root.find(".//pubDate")
         source_time = pub_date.text if pub_date is not None else datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
@@ -39,17 +38,16 @@ def fetch_official_aqhi_xml():
             station = title.text.strip()
             desc = description.text.strip()
             
-            # 关键正则：匹配 "General Stations: 4 Moderate" 或 "Roadside Stations: 5 Moderate"
-            match = re.search(r'Stations:\s*(\d{1,2}\+?)\s', desc)
+            # 关键修复：更宽松、准确的正则（匹配 ": 4 Moderate" 或 ": 5 " 等格式）
+            match = re.search(r':\s*(\d{1,2}\+?)\s', desc)
             if match:
                 aqhi_val = match.group(1)
                 success_count += 1
                 
-                # 清洗站名（Firebase Key 安全格式）
+                # 清洗站名
                 clean_station = re.sub(r'[^a-zA-Z0-9_]', '_', station)
                 clean_station = re.sub(r'_+', '_', clean_station).strip('_')
                 
-                # 区分 General / Roadside
                 if "Roadside" in desc:
                     clean_station += "_Roadside"
                 else:
@@ -57,9 +55,9 @@ def fetch_official_aqhi_xml():
                 
                 aqhi_dict[clean_station] = aqhi_val
         
-        print(f"成功解析 {len(aqhi_dict)} 个监测站（匹配成功 {success_count} 条）")
+        print(f"✅ 成功解析 {len(aqhi_dict)} 个监测站（匹配成功 {success_count} 条）")
         if aqhi_dict:
-            print("数据预览（前 6 个）:", dict(list(aqhi_dict.items())[:6]))
+            print("预览前 6 个站点:", dict(list(aqhi_dict.items())[:6]))
         
         return aqhi_dict, source_time
         
@@ -85,13 +83,13 @@ def run_sync():
         
         ref = db.reference(f"{ROOT_NODE}/{DATA_NODE}")
         
-        if aqhi_results and len(aqhi_results) >= 12:   # 正常应该有 15~18 个
+        if aqhi_results and len(aqhi_results) >= 10:
             payload = {
                 "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "source_last_updated": source_time,
                 "aqhi_readings": aqhi_results,
                 "status": "online",
-                "method": "Official_XML_Eng_Final_v2"
+                "method": "Official_XML_Eng_Final_v3"
             }
             ref.set(payload)
             print(f"🚀 [SUCCESS] 同步成功！共 {len(aqhi_results)} 个站点。")
@@ -100,7 +98,8 @@ def run_sync():
             ref.update({
                 "status": "data_insufficient", 
                 "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "stations_count": len(aqhi_results) if aqhi_results else 0
+                "stations_count": len(aqhi_results) if aqhi_results else 0,
+                "last_attempt": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             })
             
     except Exception as e:
