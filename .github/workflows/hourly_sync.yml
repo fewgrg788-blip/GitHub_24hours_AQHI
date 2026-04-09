@@ -27,11 +27,10 @@ jobs:
           pip install firebase-admin requests pandas
           echo "✅ Dependencies installed successfully."
 
-      - name: 🚀 Run Sync & Prediction Script
+      - name: Run sync script
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-          # 如果你的 Render API URL 是固定的，也可以寫在這裡
-          RENDER_GNN_API: "https://your-gagnn-service.onrender.com/predict"
+          RENDER_GNN_API: ${{ secrets.RENDER_GNN_API }}  # <--- 確保這行存在
         run: python sync_wan_data.py
 
       - name: 💾 Commit and Push history CSV
