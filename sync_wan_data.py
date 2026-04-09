@@ -32,11 +32,11 @@ def fetch_aqhi():
         for item in root.findall(".//item"):
             desc = item.find("description").text
             title = item.find("title").text
-            # 提取數字並處理 (處理 10+ 或異常值)
+            # 提取數字並處理，確保不會因為格式化出問題
             m = re.search(r'(\d{1,2})', re.sub(r'\d{4}', '', desc))
             if m:
                 val = float(m.group(1))
-                # 數據限幅處理 (1-11 級)
+                # 數據限幅處理 (1-11 級)，防止異常大值
                 val = max(1.0, min(11.0, val))
                 
                 key = re.sub(r'[^a-zA-Z0-9]', '_', title).strip('_')
@@ -52,7 +52,6 @@ def fetch_aqhi():
 def get_gnn_prediction(current_readings):
     print(f"🧠 [Step 4] Requesting GNN prediction from Render...")
     try:
-        # 確保順序與模型要求一致
         input_vector = [current_readings.get(s, 0) for s in STATIONS]
         response = requests.post(RENDER_GNN_API, json={"data": input_vector}, timeout=45)
         
@@ -63,22 +62,28 @@ def get_gnn_prediction(current_readings):
         else:
             print(f"⚠️ Render Error: {response.status_code}")
     except Exception as e:
-        print(f"⚠️ GNN Offline: {e}")
+        print(f"⚠️ GNN Offline (Render Sleeping): {e}")
     return None
 
 # --- [4. 主邏輯] ---
 def run_integration():
     now_hkt = datetime.now(HKT)
-    current_time_str = now_hkt.strftime("%Y-%m-%d %H:%00")
-    target_time_str = (now_hkt + timedelta(hours=6)).strftime("%Y-%m-%d %H:%00")
+    
+    # [修復點] Firebase 路徑 Key 不允許空格和冒號
+    db_key = now_hkt.strftime("%Y%m%d_%H00")
+    db_target_key = (now_hkt + timedelta(hours=6)).strftime("%Y%m%d_%H00")
+    
+    # CSV 與 Dashboard 顯示用的好看格式
+    display_time = now_hkt.strftime("%Y-%m-%d %H:00")
+    display_target = (now_hkt + timedelta(hours=6)).strftime("%Y-%m-%d %H:00")
 
-    print(f"\n🚀 === BuildTech Sync Start: {current_time_str} HKT ===")
+    print(f"\n🚀 === BuildTech Sync Start: {display_time} HKT ===")
     
     # Firebase 初始化
     try:
         if not firebase_admin._apps:
             creds_env = os.getenv("FIREBASE_SERVICE_ACCOUNT")
-            if not creds_env: raise ValueError("Secret Missing!")
+            if not creds_env: raise ValueError("FIREBASE_SERVICE_ACCOUNT Secret Missing!")
             firebase_admin.initialize_app(credentials.Certificate(json.loads(creds_env)), {'databaseURL': FIREBASE_URL})
     except Exception as e:
         print(f"❌ Firebase Error: {e}"); return
@@ -89,46 +94,49 @@ def run_integration():
     
     current_avg = round(sum(actual_data.values()) / len(STATIONS), 2)
 
-    # 比對 6 小時前的預測 (僅用於更新 Dashboard)
-    past_pred_ref = db.reference(f"GAGNN_v2/predictions/{current_time_str}")
+    # 比對 6 小時前的預測 (使用 db_key 確保路徑安全)
+    print(f"📊 [Step 3] Checking for past prediction for {db_key}...")
+    past_pred_ref = db.reference(f"GAGNN_v2/predictions/{db_key}")
     predicted_6h_ago = past_pred_ref.get()
 
     avg_error = 0
-    status_msg = "Initial Sync"
+    status_msg = "Initial Sync (No past data)"
     if predicted_6h_ago:
         errs = [abs(actual_data.get(s, 0) - predicted_6h_ago.get(s, 0)) for s in STATIONS]
         avg_error = sum(errs) / len(STATIONS)
         status_msg = f"Verified (MAE: {avg_error:.2f})"
-        print(f"📊 Accuracy Check: MAE = {avg_error:.2f}")
+        print(f"✅ Accuracy Check Complete: MAE = {avg_error:.2f}")
 
-    # 獲取新預測
+    # 獲取未來 6 小時預測
     new_prediction = get_gnn_prediction(actual_data)
     if new_prediction:
-        db.reference(f"GAGNN_v2/predictions/{target_time_str}").set(new_prediction)
+        db.reference(f"GAGNN_v2/predictions/{db_target_key}").set(new_prediction)
+        print(f"🔮 Prediction for {display_target} saved to Firebase (Key: {db_target_key}).")
 
     # 更新 Dashboard
     accuracy_score = round(max(0, 100 - avg_error * 10), 2) if predicted_6h_ago else 100
     db.reference("GAGNN_v2/dashboard").set({
-        "last_updated": current_time_str,
+        "last_updated": display_time,
         "current_avg": current_avg,
         "accuracy_score": accuracy_score,
         "verification_status": status_msg,
-        "prediction_target": target_time_str
+        "prediction_target": display_target
     })
+    print(f"📱 Dashboard updated with Score: {accuracy_score}")
 
-    # --- [Step 6: 精簡版 CSV 儲存] ---
-    # 格式: 時間,平均,站點1等級,站點2等級...
-    print(f"💾 Saving to {CSV_FILE}...")
+    # --- [Step 6: CSV 儲存] ---
+    print(f"💾 Saving cleaned data to {CSV_FILE}...")
     
-    # 將數值轉為整數 (去除 09 這種情況，統一轉成 9)
+    # 數值轉為整數 Level (解決 09 格式問題)
     levels = [str(int(round(actual_data.get(s, 0)))) for s in STATIONS]
-    csv_row = f"{current_time_str},{current_avg}," + ",".join(levels)
+    csv_row = f"{display_time},{current_avg}," + ",".join(levels)
 
     file_exists = os.path.isfile(CSV_FILE)
     with open(CSV_FILE, "a", encoding="utf-8") as f:
-        # 如果文件不存在，先寫表頭
         if not file_exists:
-            header = "Time,Avg," + ",".join([s.replace('_General','').replace('_Roadside','R') for s in STATIONS])
+            # 簡化表頭名稱
+            short_names = [s.replace('_General','').replace('_Roadside','R') for s in STATIONS]
+            header = "Time,Avg," + ",".join(short_names)
             f.write(header + "\n")
         f.write(csv_row + "\n")
     
