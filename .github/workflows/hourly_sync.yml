@@ -1,34 +1,37 @@
-name: ⏱️ Hourly Realtime Sync
+name: ⏱️ BuildTech WAN Hourly Sync & Verify
 
 on:
   schedule:
-    - cron: "0 * * * *"  # 每小时运行
-  workflow_dispatch:      # 允许手动触发
+    - cron: "0 * * * *"  # 每小時整點運行
+  workflow_dispatch:      # 允許手動點擊運行進行 Debug
 
 permissions:
   contents: write
 
 jobs:
-  sync:
+  sync_and_predict:
     runs-on: ubuntu-latest
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # 获取所有历史记录，确保 rebase 顺利进行
+          fetch-depth: 0
 
       - name: 🐍 Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.10' # 升级到 3.10 解决 EOL 警告
+          python-version: '3.10'
 
       - name: 📦 Install dependencies
         run: |
           pip install firebase-admin requests pandas
+          echo "✅ Dependencies installed successfully."
 
-      - name: 🚀 Run Hourly Sync Script
+      - name: 🚀 Run Sync & Prediction Script
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          # 如果你的 Render API URL 是固定的，也可以寫在這裡
+          RENDER_GNN_API: "https://your-gagnn-service.onrender.com/predict"
         run: python sync_wan_data.py
 
       - name: 💾 Commit and Push history CSV
@@ -36,15 +39,12 @@ jobs:
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           
-          # 1. 先把修改的文件加入暂存区
-          git add aqhi_history.csv
-          
-          # 2. 提交更改 (如果文件没变化，exit 0 防止报错)
-          git commit -m "Auto-update hourly history: $(date)" || exit 0
-          
-          # 3. 拉取远程更改并合并（Rebase）
-          # 现在本地是干净的提交状态，rebase 就不会报错了
-          git pull --rebase origin main
-          
-          # 4. 推送到远程
-          git push origin main
+          if [ -f aqhi_history.csv ]; then
+            git add aqhi_history.csv
+            git commit -m "Auto-update hourly history: $(date)" || echo "No changes to commit"
+            git pull --rebase origin main
+            git push origin main
+            echo "✅ CSV history pushed to GitHub."
+          else
+            echo "⚠️ CSV file not found, skipping push."
+          fi
