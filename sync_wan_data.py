@@ -30,45 +30,53 @@ def fetch_aqhi():
         res = requests.get(api_url, timeout=15)
         root = ET.fromstring(res.content.decode('utf-8', errors='ignore'))
         results = {}
-        valid_values = [] 
+        raw_data = {} # 暫存原始數據進行檢查
 
         for item in root.findall(".//item"):
             desc = item.find("description").text
             title = item.find("title").text
-            
-            # 正則表達式提取數字（排除年份）
             m = re.search(r'(\d{1,2})', re.sub(r'\d{4}', '', desc))
             key = re.sub(r'[^a-zA-Z0-9]', '_', title).strip('_')
             key += "_Roadside" if "Roadside" in desc else "_General"
 
-            # --- [功能 1: 異常值過濾 Filtering] ---
             if m:
-                val = int(m.group(1)) # 強制轉為整數，修正 "09" 字串問題
-                if val > 0:           # 只有大於 0 的才是有效值，0 會被標記為無效
-                    results[key] = val
-                    valid_values.append(val)
+                val = int(m.group(1))
+                if val > 0 and val <= 11: # 基本過濾
+                    raw_data[key] = val
                 else:
-                    print(f"⚠️ [Filter] Detected invalid value '0' for {key}, marking as None.")
-                    results[key] = None
+                    raw_data[key] = None
             else:
-                # 如果抓到 "-" 或其他非數字，標記為 None
-                print(f"⚠️ [Filter] No numeric data found for {key} (likely '-'), marking as None.")
-                results[key] = None
+                raw_data[key] = None
 
-        # --- [功能 2: 均值填充 Imputation] ---
-        # 計算全港其他有效站點的平均值（作為填充值）
-        global_avg_int = int(round(sum(valid_values) / len(valid_values))) if valid_values else 3
+        # --- [新增：異常值檢測邏輯] ---
+        # 1. 先算出目前所有有效數字的初步平均值
+        temp_list = [v for v in raw_data.values() if v is not None]
+        pre_avg = sum(temp_list) / len(temp_list) if temp_list else 3
         
+        # 2. 進行合理性檢查：如果某站點比平均值高出 4 級以上，視為錯誤 (如平均 3, 它卻 9)
+        final_valid_values = []
+        for s in STATIONS:
+            val = raw_data.get(s)
+            # 如果數值存在，且與全港平均差距在合理範圍內 (比如 <= 4)
+            if val is not None and abs(val - pre_avg) <= 4:
+                results[s] = val
+                final_valid_values.append(val)
+            else:
+                # 如果是那個異常的 9，這裡會將其設為 None
+                print(f"🚨 [Outlier Detection] Station {s} has abnormal value ({val}). Marking for repair.")
+                results[s] = None
+
+        # 3. 均值填充 (Imputation)
+        global_avg_int = int(round(sum(final_valid_values) / len(final_valid_values))) if final_valid_values else 3
         for s in STATIONS:
             if results.get(s) is None:
-                # 自動填充缺失站點（例如 Tap Mun）
-                print(f"🩹 [Impute] Filling missing data for {s} with global average: {global_avg_int}")
+                print(f"🩹 [Repair] Replacing error value in {s} with: {global_avg_int}")
                 results[s] = global_avg_int
 
-        print(f"✅ Successfully fetched and repaired data. Valid stations: {len(valid_values)}/18")
         return results
     except Exception as e:
         print(f"❌ Fetch Error: {e}"); return None
+
 
 # --- [3. AI 模型推理] ---
 def get_gnn_prediction(current_readings):
