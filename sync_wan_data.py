@@ -9,7 +9,8 @@ import json
 from datetime import datetime, timedelta, timezone
 
 # --- 配置 ---
-RENDER_GNN_API = os.getenv("RENDER_GNN_API", "https://your-gagnn-service.onrender.com/predict")
+# 建議直接寫入真實網址，避免 Workflow 環境變量沒抓到的風險
+RENDER_GNN_API = os.getenv("RENDER_GNN_API", "https://buildtech-gnn-service.onrender.com/predict")
 FIREBASE_URL = "https://project-12cc8-default-rtdb.asia-southeast1.firebasedatabase.app/"
 CSV_FILE = "aqhi_history.csv"
 HKT = timezone(timedelta(hours=8))
