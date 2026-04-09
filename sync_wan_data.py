@@ -15,11 +15,11 @@ CSV_FILE = "aqhi_history.csv"
 HKT = timezone(timedelta(hours=8))
 
 STATIONS = [
-    "Central_Western_General", "Eastern_General", "Kwai_Chung_General", "Kwun_Tong_General",
-    "North_General", "Sha_Tin_General", "Sham_Shui_Po_General", "Southern_General",
-    "Tai_Po_General", "Tap_Mun_General", "Tseung_Kwan_O_General", "Tsuen_Wan_General",
-    "Tuen_Mun_General", "Tung_Chung_General", "Yuen_Long_General",
-    "Causeway_Bay_Roadside", "Central_Roadside", "Mong_Kok_Roadside"
+    'Central_Western_General', 'Eastern_General', 'Kwun_Tong_General', 'Sham_Shui_Po_General',
+    'Kwai_Chung_General', 'Tsuen_Wan_General', 'Tseung_Kwan_O_General', 'Yuen_Long_General',
+    'Tuen_Mun_General', 'Tung_Chung_General', 'Tai_Po_General', 'Sha_Tin_General',
+    'North_General', 'Tap_Mun_General', 'Causeway_Bay_Roadside', 'Central_Roadside',
+    'Mong_Kok_Roadside', 'Southern_General'
 ]
 
 def fetch_aqhi():
