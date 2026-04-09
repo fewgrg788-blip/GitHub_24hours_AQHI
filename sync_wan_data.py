@@ -5,6 +5,7 @@ import xml.etree.ElementTree as ET
 import re
 import os
 import json
+import urllib.parse  # 引入 URL 編碼工具
 from datetime import datetime, timedelta, timezone
 
 # --- [1. 配置] ---
@@ -21,7 +22,6 @@ STATIONS = [
     'Mong_Kok_Roadside', 'Southern_General'
 ]
 
-# --- [2. 數據抓取與清洗] ---
 def fetch_aqhi():
     print("🌐 [Step 1] Fetching real-time AQHI from EPD RSS...")
     api_url = "https://www.aqhi.gov.hk/epd/ddata/html/out/aqhi_ind_rss_Eng.xml"
@@ -32,112 +32,89 @@ def fetch_aqhi():
         for item in root.findall(".//item"):
             desc = item.find("description").text
             title = item.find("title").text
-            # 提取數字並處理，確保不會因為格式化出問題
             m = re.search(r'(\d{1,2})', re.sub(r'\d{4}', '', desc))
             if m:
                 val = float(m.group(1))
-                # 數據限幅處理 (1-11 級)，防止異常大值
                 val = max(1.0, min(11.0, val))
-                
                 key = re.sub(r'[^a-zA-Z0-9]', '_', title).strip('_')
                 key += "_Roadside" if "Roadside" in desc else "_General"
                 results[key] = val
-        print(f"✅ Successfully fetched data for {len(results)} stations.")
         return results
     except Exception as e:
-        print(f"❌ Fetch Error: {e}")
-        return None
+        print(f"❌ Fetch Error: {e}"); return None
 
-# --- [3. AI 模型調用] ---
 def get_gnn_prediction(current_readings):
     print(f"🧠 [Step 4] Requesting GNN prediction from Render...")
     try:
         input_vector = [current_readings.get(s, 0) for s in STATIONS]
         response = requests.post(RENDER_GNN_API, json={"data": input_vector}, timeout=45)
-        
         if response.status_code == 200:
             pred_data = response.json().get("prediction")
-            print("✅ GNN Prediction received successfully.")
             return {STATIONS[i]: pred_data[i] for i in range(len(STATIONS))}
-        else:
-            print(f"⚠️ Render Error: {response.status_code}")
     except Exception as e:
-        print(f"⚠️ GNN Offline (Render Sleeping): {e}")
+        print(f"⚠️ GNN Offline: {e}")
     return None
 
-# --- [4. 主邏輯] ---
 def run_integration():
     now_hkt = datetime.now(HKT)
-    
-    # [修復點] Firebase 路徑 Key 不允許空格和冒號
-    db_key = now_hkt.strftime("%Y%m%d_%H00")
-    db_target_key = (now_hkt + timedelta(hours=6)).strftime("%Y%m%d_%H00")
-    
-    # CSV 與 Dashboard 顯示用的好看格式
-    display_time = now_hkt.strftime("%Y-%m-%d %H:00")
-    display_target = (now_hkt + timedelta(hours=6)).strftime("%Y-%m-%d %H:00")
+    # 你想要的標準格式
+    current_time_str = now_hkt.strftime("%Y-%m-%d %H:00")
+    target_time_str = (now_hkt + timedelta(hours=6)).strftime("%Y-%m-%d %H:00")
 
-    print(f"\n🚀 === BuildTech Sync Start: {display_time} HKT ===")
+    print(f"\n🚀 === BuildTech Sync Start: {current_time_str} HKT ===")
     
     # Firebase 初始化
     try:
         if not firebase_admin._apps:
             creds_env = os.getenv("FIREBASE_SERVICE_ACCOUNT")
-            if not creds_env: raise ValueError("FIREBASE_SERVICE_ACCOUNT Secret Missing!")
             firebase_admin.initialize_app(credentials.Certificate(json.loads(creds_env)), {'databaseURL': FIREBASE_URL})
     except Exception as e:
         print(f"❌ Firebase Error: {e}"); return
 
-    # 實時數據抓取
     actual_data = fetch_aqhi()
     if not actual_data: return
-    
     current_avg = round(sum(actual_data.values()) / len(STATIONS), 2)
 
-    # 比對 6 小時前的預測 (使用 db_key 確保路徑安全)
-    print(f"📊 [Step 3] Checking for past prediction for {db_key}...")
-    past_pred_ref = db.reference(f"GAGNN_v2/predictions/{db_key}")
+    # --- [關鍵修復：URL 安全編碼] ---
+    # 使用 quote 將 "2026-04-09 22:00" 轉為 "2026-04-09%2022%3A00"
+    safe_current_path = urllib.parse.quote(current_time_str)
+    safe_target_path = urllib.parse.quote(target_time_str)
+
+    print(f"📊 [Step 3] Checking for past prediction for {current_time_str}...")
+    past_pred_ref = db.reference(f"GAGNN_v2/predictions/{safe_current_path}")
     predicted_6h_ago = past_pred_ref.get()
 
     avg_error = 0
-    status_msg = "Initial Sync (No past data)"
+    status_msg = "Initial Sync"
     if predicted_6h_ago:
         errs = [abs(actual_data.get(s, 0) - predicted_6h_ago.get(s, 0)) for s in STATIONS]
         avg_error = sum(errs) / len(STATIONS)
         status_msg = f"Verified (MAE: {avg_error:.2f})"
-        print(f"✅ Accuracy Check Complete: MAE = {avg_error:.2f}")
 
-    # 獲取未來 6 小時預測
     new_prediction = get_gnn_prediction(actual_data)
     if new_prediction:
-        db.reference(f"GAGNN_v2/predictions/{db_target_key}").set(new_prediction)
-        print(f"🔮 Prediction for {display_target} saved to Firebase (Key: {db_target_key}).")
+        # 使用轉義後的路徑寫入，但在 Firebase 顯示會是原始字串
+        db.reference(f"GAGNN_v2/predictions/{safe_target_path}").set(new_prediction)
+        print(f"🔮 Prediction for {target_time_str} saved successfully.")
 
-    # 更新 Dashboard
     accuracy_score = round(max(0, 100 - avg_error * 10), 2) if predicted_6h_ago else 100
     db.reference("GAGNN_v2/dashboard").set({
-        "last_updated": display_time,
+        "last_updated": current_time_str,
         "current_avg": current_avg,
         "accuracy_score": accuracy_score,
         "verification_status": status_msg,
-        "prediction_target": display_target
+        "prediction_target": target_time_str
     })
-    print(f"📱 Dashboard updated with Score: {accuracy_score}")
 
     # --- [Step 6: CSV 儲存] ---
-    print(f"💾 Saving cleaned data to {CSV_FILE}...")
-    
-    # 數值轉為整數 Level (解決 09 格式問題)
     levels = [str(int(round(actual_data.get(s, 0)))) for s in STATIONS]
-    csv_row = f"{display_time},{current_avg}," + ",".join(levels)
+    csv_row = f"{current_time_str},{current_avg}," + ",".join(levels)
 
     file_exists = os.path.isfile(CSV_FILE)
     with open(CSV_FILE, "a", encoding="utf-8") as f:
         if not file_exists:
-            # 簡化表頭名稱
             short_names = [s.replace('_General','').replace('_Roadside','R') for s in STATIONS]
-            header = "Time,Avg," + ",".join(short_names)
-            f.write(header + "\n")
+            f.write("Time,Avg," + ",".join(short_names) + "\n")
         f.write(csv_row + "\n")
     
     print(f"🏁 === BuildTech Sync Finished ===\n")
