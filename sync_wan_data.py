@@ -19,7 +19,8 @@ STATION_MAP = {
     "沙洲": "SC", "石壁": "SE", "石崗": "SEK", "天星碼頭": "SF", "沙田": "SHA", 
     "沙螺灣": "SHL", "西貢": "SKG", "東涌": "TC", "打鼓嶺": "TKL", "大美督": "TME", 
     "大埔滘": "TPK", "屯門": "TUN", "大老山": "WGL", "濕地公園": "WLP", "天文台": "HKO", 
-    "九龍城": "KSC", "大帽山": "TMS", "青衣": "TYW", "元朗": "YCT", "大美督": "SSH",
+    "九龍城": "KSC", "大帽山": "TMS", "青衣": "TYW", "元朗": "YCT", 
+    "航海學校": "SSH", "啟德": "KT", "赤柱": "STAN",
     "Central/Western": "Central/Western", "Eastern": "Eastern", "Kwun Tong": "Kwun Tong",
     "Sham Shui Po": "Sham Shui Po", "Kwai Chung": "Kwai Chung", "Tsuen Wan": "Tsuen Wan",
     "Yuen Long": "Yuen Long", "Tuen Mun": "Tuen Mun", "Tung Chung": "Tung Chung",
@@ -47,14 +48,14 @@ ALL_COLUMNS = [
 
 def wind_text_to_degrees(text):
     if not text or any(x in text for x in ["0.0", "不定", "N/A", "Variable", "無風"]): return 0.0
-    mapping = {"北": 0, "北北東": 22.5, "東北": 45, "東北東": 67.5, "東": 90, "東南東": 112.5, "東南": 135, "南南東": 157.5, "南": 180, "南南西": 202.5, "西南": 225, "西南西": 247.5, "西": 270, "西北西": 292.5, "西北": 315, "北西北": 337.5}
-    return mapping.get(text, 0.0)
+    m = {"北": 0, "北北東": 22.5, "東北": 45, "東北東": 67.5, "東": 90, "東南東": 112.5, "東南": 135, "南南東": 157.5, "南": 180, "南南西": 202.5, "西南": 225, "西南西": 247.5, "西": 270, "西北西": 292.5, "西北": 315, "北西北": 337.5}
+    return m.get(text, 0.0)
 
 def fetch_data():
-    print("🚀 開始數據抓取...")
     fetched = {}
     vals = {"aqhi": [], "hum": [], "wspd": [], "pdir": []}
-
+    
+    # 1. AQHI
     try:
         r = requests.get("https://www.aqhi.gov.hk/epd/ddata/html/out/aqhi_ind_rss_Eng.xml", timeout=10)
         content = re.sub(r'\sxmlns="[^"]+"', '', r.text, count=1)
@@ -71,22 +72,23 @@ def fetch_data():
                         vals["aqhi"].append(val)
     except: pass
 
+    # 2. Wind
     try:
         r = requests.get("https://data.weather.gov.hk/weatherAPI/hko_data/regional-weather/latest_10min_wind_uc.csv")
-        csv_text = r.content.decode('utf-8')
-        lines = csv_text.strip().split('\n')
+        lines = r.content.decode('utf-8').strip().split('\n')
         for line in lines[1:]:
             cols = [v.replace('"', '').strip() for v in line.split(',')]
             if len(cols) < 4: continue
             for name, sid in STATION_MAP.items():
                 if name in cols[1]:
-                    deg = wind_text_to_degrees(cols[2])
+                    deg, spd = wind_text_to_degrees(cols[2]), 0.0
                     try: spd = float(cols[3])
-                    except: spd = 0.0
+                    except: pass
                     fetched[f"PDIR_{sid}"] = deg; vals["pdir"].append(deg)
                     fetched[f"WSPD_{sid}"] = spd; vals["wspd"].append(spd)
     except: pass
 
+    # 3. Humidity
     try:
         r = requests.get("https://data.weather.gov.hk/weatherAPI/opendata/weather.php?dataType=rhrread&lang=tc")
         for item in r.json().get('humidity', {}).get('data', []):
@@ -97,7 +99,6 @@ def fetch_data():
                     vals["hum"].append(val)
     except: pass
 
-    # --- 關鍵修正處：統一使用大寫鍵名 ---
     means = {
         "AQHI": sum(vals["aqhi"])/len(vals["aqhi"]) if vals["aqhi"] else 3.0,
         "HUM": sum(vals["hum"])/len(vals["hum"]) if vals["hum"] else 75.0,
@@ -110,30 +111,31 @@ def run():
     now = datetime.now(HKT)
     fetched, means = fetch_data()
 
-    # Firebase 更新
+    # Firebase (對齊 JS 版鍵名)
     try:
         if not firebase_admin._apps:
             creds = json.loads(os.getenv("FIREBASE_SERVICE_ACCOUNT"))
             firebase_admin.initialize_app(credentials.Certificate(creds), {'databaseURL': FIREBASE_URL})
-        fb_readings = {}
+        fb_data = {}
         for col in ALL_COLUMNS:
             if col.startswith("AQHI_"):
-                key = col.replace("AQHI_", "").replace("/", "_") + "_General"
-                fb_readings[key] = fetched.get(col, int(round(means["AQHI"])))
+                # 將 "AQHI_Tuen Mun" 轉為 "Tuen_Mun_General"
+                key = col.replace("AQHI_", "").replace("/", "_").replace(" ", "_") + "_General"
+                fb_data[key] = fetched.get(col, int(round(means["AQHI"])))
+        
         db.reference("GAGNN_24hours/GAGNN_data").update({
             "last_updated": now.strftime("%Y-%m-%d %H:%M:%S"),
-            "readings": fb_readings
+            "readings": fb_data
         })
     except: pass
 
-    # CSV 寫入
-    row = []
-    real_count = 0
-    for col in ALL_COLUMNS:
-        if col == "Date": row.append(now.strftime("%Y-%m-%d"))
-        elif col == "Cyclone_Present": row.append(0)
+    # CSV
+    row = [now.strftime("%Y-%m-%d")]
+    real_c = 0
+    for col in ALL_COLUMNS[1:]: # 跳過 Date
+        if col == "Cyclone_Present": row.append(0)
         elif col in fetched:
-            row.append(fetched[col]); real_count += 1
+            row.append(fetched[col]); real_c += 1
         else:
             if "AQHI" in col: row.append(round(means["AQHI"]))
             elif "HUM" in col: row.append(round(means["HUM"], 1))
@@ -141,9 +143,9 @@ def run():
             elif "PDIR" in col: row.append(round(means["PDIR"], 1))
             else: row.append(0.0)
 
-    print(f"📊 匹配完成！真實數據點: {real_count} / 95")
     with open(CSV_FILE, "a", encoding="utf-8") as f:
         f.write(",".join(map(str, row)) + "\n")
+    print(f"✅ 數據同步完成！真實數據點: {real_c}")
 
 if __name__ == "__main__":
     run()
