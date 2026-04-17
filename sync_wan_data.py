@@ -3,7 +3,6 @@ from firebase_admin import credentials, db
 import requests
 import xml.etree.ElementTree as ET
 import os
-import json
 import re
 from datetime import datetime, timedelta, timezone
 
@@ -12,7 +11,7 @@ FIREBASE_URL = "https://project-12cc8-default-rtdb.asia-southeast1.firebasedatab
 CSV_FILE = "aqhi_history.csv"
 HKT = timezone(timedelta(hours=8))
 
-# 95 欄位定義
+# 95 欄位定義 (略, 保持不變)
 ALL_COLUMNS = [
     "Date", "AQHI_Central/Western", "AQHI_Eastern", "AQHI_Kwun Tong", "AQHI_Sham Shui Po",
     "AQHI_Kwai Chung", "AQHI_Tsuen Wan", "AQHI_Yuen Long", "AQHI_Tuen Mun", "AQHI_Tung Chung",
@@ -38,99 +37,96 @@ STATIONS_FIREBASE = [
     'Mong_Kok_Roadside', 'Southern_General'
 ]
 
+# 核心映射表 (已根據官方 API 格式優化)
 STATION_MAP = {
-    "橫瀾島": "BHD", "長洲": "CCH", "中環碼頭": "CP1", "青洲": "GI", "赤鱲角": "HKA",
-    "黃竹坑": "HKS", "將軍澳": "JKB", "京士柏": "KP", "南丫島": "LAM", "流浮山": "LFS",
-    "昂坪": "NGP", "北角": "NP", "坪洲": "PEN", "山頂": "PLC", "沙洲": "SC", "石壁": "SE",
-    "石崗": "SEK", "九龍天星碼頭": "SF", "沙田": "SHA", "沙螺灣": "SHL", "西貢": "SKG", 
-    "東涌": "TC", "打鼓嶺": "TKL", "大美督": "TME", "大埔滘": "TPK", "屯門": "TUN", 
-    "大老山": "WGL", "香港濕地公園": "WLP", "香港天文台": "HKO", "九龍城": "KSC", 
-    "大帽山": "TMS", "青衣": "TYW", "元朗": "YCT"
+    "橫瀾島": "BHD", "Waglan Island": "BHD", "長洲": "CCH", "Cheung Chau": "CCH",
+    "中環": "CP1", "Central": "CP1", "赤鱲角": "HKA", "Chek Lap Kok": "HKA",
+    "黃竹坑": "HKS", "Wong Chuk Hang": "HKS", "將軍澳": "JKB", "Tseung Kwan O": "JKB",
+    "京士柏": "KP", "King's Park": "KP", "流浮山": "LFS", "Lau Fau Shan": "LFS",
+    "昂坪": "NGP", "Ngong Ping": "NGP", "北角": "NP", "North Point": "NP",
+    "沙田": "SHA", "Sha Tin": "SHA", "西貢": "SKG", "Sai Kung": "SKG",
+    "東涌": "TC", "Tung Chung": "TC", "打鼓嶺": "TKL", "Ta Kwu Ling": "TKL",
+    "大美督": "TME", "Tai Mei Tuk": "TME", "屯門": "TUN", "Tuen Mun": "TUN",
+    "大老山": "WGL", "Tate's Cairn": "WGL", "濕地公園": "WLP", "Wetland Park": "WLP",
+    "天文台": "HKO", "Observatory": "HKO", "九龍城": "KSC", "Kowloon City": "KSC",
+    "大帽山": "TMS", "Tai Mo Shan": "TMS", "青衣": "TYW", "Tsing Yi": "TYW", "元朗": "YCT", "Yuen Long": "YCT"
 }
 
 def wind_text_to_degrees(text):
-    if not text or any(x in text for x in ["0.0", "不定", "N/A"]): return None
-    mapping = {"北": 0, "北北東": 22.5, "東北": 45, "東北東": 67.5, "東": 90, "東南東": 112.5, "東南": 135, "南南東": 157.5, "南": 180, "南南西": 202.5, "西南": 225, "西南西": 247.5, "西": 270, "西北西": 292.5, "西北": 315, "北西北": 337.5}
-    return mapping.get(text)
+    if not text or any(x in text for x in ["0.0", "不定", "N/A", "Variable"]): return None
+    mapping = {"北": 0, "N": 0, "東北": 45, "NE": 45, "東": 90, "E": 90, "東南": 135, "SE": 135, "南": 180, "S": 180, "西南": 225, "SW": 225, "西": 270, "W": 270, "西北": 315, "NW": 315}
+    # 模糊匹配開頭
+    for k, v in mapping.items():
+        if text.startswith(k): return v
+    return None
 
-# --- [2. 核心抓取邏輯 + Debug 追蹤] ---
-def fetch_with_debug():
-    print("\n--- 🔍 正在抓取實時數據並進行調試分析 ---")
+def fetch_with_deep_debug():
+    print("\n--- 🔍 開始深度數據抓取 (DEBUG MODE) ---")
     fetched = {}
-    source_track = {"Real": 0, "Default": 0}
     v = {"aqhi": [], "hum": [], "wspd": [], "pdir": []}
 
     # 1. AQHI RSS
     try:
-        r = requests.get("https://www.aqhi.gov.hk/epd/ddata/html/out/aqhi_ind_rss_Eng.xml", timeout=10)
+        r = requests.get("https://www.aqhi.gov.hk/epd/ddata/html/out/aqhi_ind_rss_Eng.xml", timeout=15)
         root = ET.fromstring(r.content)
         for item in root.findall(".//item"):
-            title = item.find("title").text
+            title = item.find("title").text # "Central/Western: 3"
             if ":" in title:
-                loc, val = title.split(":")
-                loc, val = loc.strip(), int(val.strip())
-                fetched[f"AQHI_{loc}"] = val
-                v["aqhi"].append(val)
-        print(f"✅ AQHI: 已從 RSS 成功抓取 {len(v['aqhi'])} 個站點。")
-    except Exception as e:
-        print(f"❌ AQHI 抓取失敗: {e}")
+                loc_raw, val_raw = title.split(":")
+                loc_name = loc_raw.strip()
+                try:
+                    val = int(re.search(r'\d+', val_raw).group())
+                    fetched[f"AQHI_{loc_name}"] = val
+                    v["aqhi"].append(val)
+                except: pass
+        print(f"✅ AQHI: 成功匹配 {len(v['aqhi'])} 個站點 (包含 {list(fetched.keys())[:3]}...)")
+    except Exception as e: print(f"❌ AQHI 錯誤: {e}")
 
     # 2. Wind CSV
     try:
         r = requests.get("https://data.weather.gov.hk/weatherAPI/hko_data/regional-weather/latest_10min_wind_uc.csv")
         lines = r.text.strip().split('\n')[1:]
-        wind_count = 0
         for line in lines:
             c = [x.strip('"').strip() for x in line.split(',')]
+            if len(c) < 4: continue
+            # 遍歷 Map 進行模糊匹配
             for name, sid in STATION_MAP.items():
                 if name in c[1]:
                     deg = wind_text_to_degrees(c[2])
                     try: spd = float(c[3])
                     except: spd = None
-                    if deg is not None: 
-                        fetched[f"PDIR_{sid}"] = deg
-                        v["pdir"].append(deg)
-                    if spd is not None: 
-                        fetched[f"WSPD_{sid}"] = spd
-                        v["wspd"].append(spd)
-                        wind_count += 1
-        print(f"✅ 風力: 已匹配 {wind_count} 個氣象站點數據。")
-    except Exception as e:
-        print(f"❌ 風力 CSV 解析失敗: {e}")
+                    if deg is not None: fetched[f"PDIR_{sid}"] = deg; v["pdir"].append(deg)
+                    if spd is not None: fetched[f"WSPD_{sid}"] = spd; v["wspd"].append(spd)
+    except Exception as e: print(f"❌ 風力錯誤: {e}")
 
     # 3. Humidity JSON
     try:
         r = requests.get("https://data.weather.gov.hk/weatherAPI/opendata/weather.php?dataType=rhrread&lang=tc")
-        hum_data = r.json().get('humidity', {}).get('data', [])
-        hum_count = 0
-        for item in hum_data:
+        h_list = r.json().get('humidity', {}).get('data', [])
+        for item in h_list:
+            place = item['place']
+            val = float(item['value'])
             for name, sid in STATION_MAP.items():
-                if name in item['place']:
-                    val = float(item['value'])
+                if name in place:
                     fetched[f"HUM_{sid}"] = val
                     v["hum"].append(val)
-                    hum_count += 1
-        print(f"✅ 濕度: 已匹配 {hum_count} 個濕度監測點數據。")
-    except Exception as e:
-        print(f"❌ 濕度 JSON 解析失敗: {e}")
+                    break
+        print(f"✅ 濕度: 成功匹配 {len(v['hum'])} 個站點。")
+    except Exception as e: print(f"❌ 濕度錯誤: {e}")
 
-    # 計算預設平均值
     means = {
         "AQHI": sum(v["aqhi"])/len(v["aqhi"]) if v["aqhi"] else 3.0,
         "HUM": sum(v["hum"])/len(v["hum"]) if v["hum"] else 80.0,
         "WSPD": sum(v["wspd"])/len(v["wspd"]) if v["wspd"] else 5.0,
         "PDIR": sum(v["pdir"])/len(v["pdir"]) if v["pdir"] else 180.0
     }
-    
-    print(f"💡 當前全港平均值參考: AQHI={round(means['AQHI'],1)}, HUM={round(means['HUM'],1)}%, 風速={round(means['WSPD'],1)}")
     return fetched, means
 
-# --- [3. 執行同步與 CSV 寫入] ---
 def run_sync():
     now_hkt = datetime.now(HKT)
-    fetched, means = fetch_with_debug()
+    fetched, means = fetch_with_deep_debug()
 
-    # Firebase 更新
+    # Firebase 更新 (18 站)
     try:
         if not firebase_admin._apps:
             creds_env = os.getenv("FIREBASE_SERVICE_ACCOUNT")
@@ -138,55 +134,49 @@ def run_sync():
         
         fb_readings = {}
         for s in STATIONS_FIREBASE:
-            clean_name = s.replace('_General','').replace('_Roadside','').replace('_','/')
-            val = fetched.get(f"AQHI_{clean_name}", int(round(means["AQHI"])))
-            fb_readings[s] = val
+            # 轉換名稱以匹配 fetched 鍵值
+            short_name = s.replace('_General','').replace('_Roadside','').replace('_',' ')
+            # 嘗試精確匹配或包含匹配
+            val = None
+            for k, v in fetched.items():
+                if "AQHI_" in k and short_name in k.replace('/',' '):
+                    val = v
+                    break
+            fb_readings[s] = val if val is not None else int(round(means["AQHI"]))
         
         db.reference("GAGNN_24hours/GAGNN_data").update({
             "last_updated": now_hkt.strftime("%Y-%m-%d %H:%M:%S.%f"),
             "readings": fb_readings
         })
-        print("✅ Firebase 實時數據更新完成。")
-    except Exception as e:
-        print(f"⚠️ Firebase 更新警告: {e}")
+    except Exception as e: print(f"⚠️ Firebase 失敗: {e}")
 
-    # CSV 寫入 (95 欄位) 與 數據來源檢查
+    # CSV 95 欄位寫入
     row = []
-    real_count = 0
-    default_count = 0
-
+    real_c = 0
     for col in ALL_COLUMNS:
-        if col == "Date":
-            row.append(now_hkt.strftime("%Y-%m-%d"))
-        elif col == "Cyclone_Present":
-            row.append(0)
+        if col == "Date": row.append(now_hkt.strftime("%Y-%m-%d"))
+        elif col == "Cyclone_Present": row.append(0)
         elif col in fetched:
-            row.append(fetched[col])
-            real_count += 1
+            row.append(fetched[col]); real_c += 1
         else:
-            # 填入預設值並記錄
-            default_count += 1
-            if "AQHI" in col: row.append(round(means["AQHI"]))
+            # 補位邏輯
+            if "AQHI" in col:
+                # 再次嘗試模糊查找 AQHI
+                base = col.replace("AQHI_","")
+                val = next((v for k,v in fetched.items() if base in k), round(means["AQHI"]))
+                row.append(val)
+                if val != round(means["AQHI"]): real_c += 1
             elif "HUM" in col: row.append(round(means["HUM"], 1))
             elif "WSPD" in col: row.append(round(means["WSPD"], 1))
             elif "PDIR" in col: row.append(round(means["PDIR"], 1))
             else: row.append(0.0)
 
-    # 打印數據健康度報告
-    total_metrics = real_count + default_count
-    health_score = (real_count / total_metrics) * 100
-    print(f"📊 數據存檔報告: [真實值: {real_count}] [預設值: {default_count}] [健康度: {health_score:.1f}%]")
-    if health_score < 50:
-        print("🚩 警告: 超過一半的數據使用了預設值，請檢查 API 站點映射。")
+    print(f"📊 最終存檔報告: [真實值: {real_c}] [預設值: {95-real_c}] [健康度: {(real_c/95)*100:.1f}%]")
 
-    # 儲存
     file_exists = os.path.isfile(CSV_FILE)
     with open(CSV_FILE, "a", encoding="utf-8") as f:
-        if not file_exists:
-            f.write(",".join(ALL_COLUMNS) + "\n")
+        if not file_exists: f.write(",".join(ALL_COLUMNS) + "\n")
         f.write(",".join(map(str, row)) + "\n")
-    
-    print(f"🏁 同步結束時間: {now_hkt.strftime('%Y-%m-%d %H:%M:%S')}")
 
 if __name__ == "__main__":
     run_sync()
