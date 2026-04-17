@@ -3,6 +3,7 @@ from firebase_admin import credentials, db
 import requests
 import xml.etree.ElementTree as ET
 import os
+import json
 import re
 from datetime import datetime, timedelta, timezone
 
@@ -161,13 +162,17 @@ def fetch_data():
 # 初始化 Firebase (GitHub Actions 環境下建議放在外面)
 if not firebase_admin._apps:
     try:
-        # 如果是 GitHub Actions，從環境變量讀取
+        # 優先嘗試從 GitHub Actions 環境變數讀取
         creds_json = os.getenv("FIREBASE_SERVICE_ACCOUNT")
         if creds_json:
+            # 這裡需要 json 模組來解析字串
             cred = credentials.Certificate(json.loads(creds_json))
+            print("🔐 使用環境變數初始化 Firebase")
         else:
-            # 本地測試使用文件
+            # 本地測試使用實體檔案
+            # SERVICE_ACCOUNT_PATH = "path/to/your/serviceAccountKey.json"
             cred = credentials.Certificate(SERVICE_ACCOUNT_PATH)
+            print("📂 使用本地 JSON 檔案初始化 Firebase")
             
         firebase_admin.initialize_app(cred, {'databaseURL': FIREBASE_URL})
         print("🔥 Firebase 初始化成功")
