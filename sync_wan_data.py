@@ -4,6 +4,7 @@ import requests
 import xml.etree.ElementTree as ET
 import os
 import re
+import json  # 修正：補上缺失的 json 模組
 from datetime import datetime, timedelta, timezone
 
 # --- [1. 配置] ---
@@ -11,7 +12,7 @@ FIREBASE_URL = "https://project-12cc8-default-rtdb.asia-southeast1.firebasedatab
 CSV_FILE = "aqhi_history.csv"
 HKT = timezone(timedelta(hours=8))
 
-# 95 欄位定義 (略, 保持不變)
+# 95 欄位定義
 ALL_COLUMNS = [
     "Date", "AQHI_Central/Western", "AQHI_Eastern", "AQHI_Kwun Tong", "AQHI_Sham Shui Po",
     "AQHI_Kwai Chung", "AQHI_Tsuen Wan", "AQHI_Yuen Long", "AQHI_Tuen Mun", "AQHI_Tung Chung",
@@ -37,7 +38,7 @@ STATIONS_FIREBASE = [
     'Mong_Kok_Roadside', 'Southern_General'
 ]
 
-# 核心映射表 (已根據官方 API 格式優化)
+# 氣象站點地圖
 STATION_MAP = {
     "橫瀾島": "BHD", "Waglan Island": "BHD", "長洲": "CCH", "Cheung Chau": "CCH",
     "中環": "CP1", "Central": "CP1", "赤鱲角": "HKA", "Chek Lap Kok": "HKA",
@@ -55,13 +56,13 @@ STATION_MAP = {
 def wind_text_to_degrees(text):
     if not text or any(x in text for x in ["0.0", "不定", "N/A", "Variable"]): return None
     mapping = {"北": 0, "N": 0, "東北": 45, "NE": 45, "東": 90, "E": 90, "東南": 135, "SE": 135, "南": 180, "S": 180, "西南": 225, "SW": 225, "西": 270, "W": 270, "西北": 315, "NW": 315}
-    # 模糊匹配開頭
     for k, v in mapping.items():
         if text.startswith(k): return v
     return None
 
+# --- [2. 數據抓取：增加對斜槓名稱的處理] ---
 def fetch_with_deep_debug():
-    print("\n--- 🔍 開始深度數據抓取 (DEBUG MODE) ---")
+    print("\n--- 🔍 開始數據抓取與字串比對 ---")
     fetched = {}
     v = {"aqhi": [], "hum": [], "wspd": [], "pdir": []}
 
@@ -70,26 +71,26 @@ def fetch_with_deep_debug():
         r = requests.get("https://www.aqhi.gov.hk/epd/ddata/html/out/aqhi_ind_rss_Eng.xml", timeout=15)
         root = ET.fromstring(r.content)
         for item in root.findall(".//item"):
-            title = item.find("title").text # "Central/Western: 3"
+            title = item.find("title").text # 例如 "Central/Western: 3"
             if ":" in title:
-                loc_raw, val_raw = title.split(":")
-                loc_name = loc_raw.strip()
-                try:
-                    val = int(re.search(r'\d+', val_raw).group())
+                parts = title.split(":")
+                loc_name = parts[0].strip()
+                # 使用 Regex 提取數字
+                val_match = re.search(r'\d+', parts[1])
+                if val_match:
+                    val = int(val_match.group())
+                    # 關鍵：將 "Central/Western" 存為 "AQHI_Central/Western" 
+                    # 這樣就能直接與 ALL_COLUMNS 中的名稱對上
                     fetched[f"AQHI_{loc_name}"] = val
                     v["aqhi"].append(val)
-                except: pass
-        print(f"✅ AQHI: 成功匹配 {len(v['aqhi'])} 個站點 (包含 {list(fetched.keys())[:3]}...)")
+        print(f"✅ AQHI: 已抓取 {len(v['aqhi'])} 個站點。")
     except Exception as e: print(f"❌ AQHI 錯誤: {e}")
 
-    # 2. Wind CSV
+    # 2. Wind CSV & 3. Humidity JSON (保持不變)
     try:
-        r = requests.get("https://data.weather.gov.hk/weatherAPI/hko_data/regional-weather/latest_10min_wind_uc.csv")
-        lines = r.text.strip().split('\n')[1:]
-        for line in lines:
+        w_r = requests.get("https://data.weather.gov.hk/weatherAPI/hko_data/regional-weather/latest_10min_wind_uc.csv")
+        for line in w_r.text.strip().split('\n')[1:]:
             c = [x.strip('"').strip() for x in line.split(',')]
-            if len(c) < 4: continue
-            # 遍歷 Map 進行模糊匹配
             for name, sid in STATION_MAP.items():
                 if name in c[1]:
                     deg = wind_text_to_degrees(c[2])
@@ -97,22 +98,17 @@ def fetch_with_deep_debug():
                     except: spd = None
                     if deg is not None: fetched[f"PDIR_{sid}"] = deg; v["pdir"].append(deg)
                     if spd is not None: fetched[f"WSPD_{sid}"] = spd; v["wspd"].append(spd)
-    except Exception as e: print(f"❌ 風力錯誤: {e}")
-
-    # 3. Humidity JSON
-    try:
-        r = requests.get("https://data.weather.gov.hk/weatherAPI/opendata/weather.php?dataType=rhrread&lang=tc")
-        h_list = r.json().get('humidity', {}).get('data', [])
-        for item in h_list:
-            place = item['place']
-            val = float(item['value'])
+        
+        h_r = requests.get("https://data.weather.gov.hk/weatherAPI/opendata/weather.php?dataType=rhrread&lang=tc")
+        for it in h_r.json().get('humidity', {}).get('data', []):
             for name, sid in STATION_MAP.items():
-                if name in place:
+                if name in it['place']:
+                    val = float(it['value'])
                     fetched[f"HUM_{sid}"] = val
                     v["hum"].append(val)
                     break
-        print(f"✅ 濕度: 成功匹配 {len(v['hum'])} 個站點。")
-    except Exception as e: print(f"❌ 濕度錯誤: {e}")
+        print(f"✅ 風力/濕度已更新。")
+    except Exception as e: print(f"❌ 天氣數據錯誤: {e}")
 
     means = {
         "AQHI": sum(v["aqhi"])/len(v["aqhi"]) if v["aqhi"] else 3.0,
@@ -126,7 +122,7 @@ def run_sync():
     now_hkt = datetime.now(HKT)
     fetched, means = fetch_with_deep_debug()
 
-    # Firebase 更新 (18 站)
+    # Firebase 更新
     try:
         if not firebase_admin._apps:
             creds_env = os.getenv("FIREBASE_SERVICE_ACCOUNT")
@@ -134,15 +130,10 @@ def run_sync():
         
         fb_readings = {}
         for s in STATIONS_FIREBASE:
-            # 轉換名稱以匹配 fetched 鍵值
-            short_name = s.replace('_General','').replace('_Roadside','').replace('_',' ')
-            # 嘗試精確匹配或包含匹配
-            val = None
-            for k, v in fetched.items():
-                if "AQHI_" in k and short_name in k.replace('/',' '):
-                    val = v
-                    break
-            fb_readings[s] = val if val is not None else int(round(means["AQHI"]))
+            # 匹配邏輯：將 Firebase 的底線名稱轉回 API 的斜槓格式
+            target_key = "AQHI_" + s.replace('_General','').replace('_Roadside','').replace('_','/')
+            val = fetched.get(target_key, int(round(means["AQHI"])))
+            fb_readings[s] = val
         
         db.reference("GAGNN_24hours/GAGNN_data").update({
             "last_updated": now_hkt.strftime("%Y-%m-%d %H:%M:%S.%f"),
@@ -159,23 +150,16 @@ def run_sync():
         elif col in fetched:
             row.append(fetched[col]); real_c += 1
         else:
-            # 補位邏輯
-            if "AQHI" in col:
-                # 再次嘗試模糊查找 AQHI
-                base = col.replace("AQHI_","")
-                val = next((v for k,v in fetched.items() if base in k), round(means["AQHI"]))
-                row.append(val)
-                if val != round(means["AQHI"]): real_c += 1
+            # 補位
+            if "AQHI" in col: row.append(round(means["AQHI"]))
             elif "HUM" in col: row.append(round(means["HUM"], 1))
             elif "WSPD" in col: row.append(round(means["WSPD"], 1))
             elif "PDIR" in col: row.append(round(means["PDIR"], 1))
             else: row.append(0.0)
 
-    print(f"📊 最終存檔報告: [真實值: {real_c}] [預設值: {95-real_c}] [健康度: {(real_c/95)*100:.1f}%]")
-
-    file_exists = os.path.isfile(CSV_FILE)
+    print(f"📊 最終存檔報告: [真實值: {real_c}] [健康度: {(real_c/95)*100:.1f}%]")
+    
     with open(CSV_FILE, "a", encoding="utf-8") as f:
-        if not file_exists: f.write(",".join(ALL_COLUMNS) + "\n")
         f.write(",".join(map(str, row)) + "\n")
 
 if __name__ == "__main__":
