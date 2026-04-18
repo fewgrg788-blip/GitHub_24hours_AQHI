@@ -3,7 +3,6 @@ from firebase_admin import credentials, db
 import requests
 import xml.etree.ElementTree as ET
 import os
-import json
 import re
 from datetime import datetime, timedelta, timezone
 
@@ -78,7 +77,10 @@ def fetch_data():
             title = (item.find("title").text or "")
             desc = (item.find("description").text or "")
             pure_name = title.split('-')[0].strip().replace("Roadside", "").replace("General Stations", "").strip()
-            val_match = re.search(r'(\d+)\s+(Low|Moderate|High|Very High|Serious)', desc)
+            
+            # 🛠️ 修復 1：加入 re.IGNORECASE，讓它無視大小寫，完美捕捉 "Very high"
+            val_match = re.search(r'(\d+)\s+(Low|Moderate|High|Very High|Serious)', desc, re.IGNORECASE)
+            
             if val_match:
                 val = int(val_match.group(1))
                 key = f"AQHI_{pure_name}"
@@ -158,90 +160,61 @@ def fetch_data():
     return fetched, means
 
 # ====================== Firebase & run ======================
-
-# 初始化 Firebase (GitHub Actions 環境下建議放在外面)
 if not firebase_admin._apps:
     try:
-        # 優先嘗試從 GitHub Actions 環境變數讀取
-        creds_json = os.getenv("FIREBASE_SERVICE_ACCOUNT")
-        if creds_json:
-            # 這裡需要 json 模組來解析字串
-            cred = credentials.Certificate(json.loads(creds_json))
-            print("🔐 使用環境變數初始化 Firebase")
-        else:
-            # 本地測試使用實體檔案
-            # SERVICE_ACCOUNT_PATH = "path/to/your/serviceAccountKey.json"
-            cred = credentials.Certificate(SERVICE_ACCOUNT_PATH)
-            print("📂 使用本地 JSON 檔案初始化 Firebase")
-            
+        cred = credentials.Certificate(SERVICE_ACCOUNT_PATH)
         firebase_admin.initialize_app(cred, {'databaseURL': FIREBASE_URL})
         print("🔥 Firebase 初始化成功")
-    except Exception as e:
-        print(f"⚠️ Firebase 初始化失敗: {e}")
+    except:
+        print("⚠️ Firebase 初始化失敗（可忽略）")
 
-def upload_to_firebase(fetched, means, now):
-    """
-    對齊 JS 結構: GAGNN_24hours/GAGNN_data
-    包含 last_updated 和 readings (站點名_General)
-    """
+def upload_to_firebase(row, timestamp_str):
     try:
-        fb_data = {}
-        # 遍歷所有欄位，只抓取 AQHI 部分
-        for col in ALL_COLUMNS:
-            if col.startswith("AQHI_"):
-                # 轉換名稱: "AQHI_Central/Western" -> "Central_Western_General"
-                # 處理斜線、空格，並加上 _General
-                pure_name = col.replace("AQHI_", "")
-                safe_name = pure_name.replace("/", "_").replace(" ", "_")
-                key = f"{safe_name}_General"
-                
-                # 優先使用抓取到的值，若無則用平均值填補 (轉為整數)
-                val = fetched.get(col, int(round(means["AQHI"])))
-                fb_data[key] = int(val)
-
-        # 更新 Firebase 固定路徑
-        ref = db.reference("GAGNN_24hours/GAGNN_data")
-        ref.update({
-            "last_updated": now.strftime("%Y-%m-%d %H:%M:%S"),
-            "readings": fb_data
-        })
-        print(f"✅ Firebase 同步成功 → {now.strftime('%H:%M:%S')} (已更新 readings)")
+        ref = db.reference(f"aqhi_history/{timestamp_str.replace(' ', '_').replace(':', '-')}")
         
+        # 🛠️ 修復 2：將 ALL_COLUMNS 裡面的 "/" 替換成 "_"，避免 Firebase 報錯
+        safe_keys = [k.replace("/", "_") for k in ALL_COLUMNS]
+        data_dict = dict(zip(safe_keys, row))
+        
+        ref.set(data_dict)
+        print(f"✅ Firebase 上傳成功 → {timestamp_str}")
     except Exception as e:
         print(f"⚠️ Firebase 上傳失敗: {e}（可忽略）")
 
 def run():
     now = datetime.now(HKT)
     timestamp_str = now.strftime("%Y-%m-%d %H:%M")
-    
-    # 執行數據抓取
     fetched, means = fetch_data()
     
-    # 1. 準備 CSV Row
     row = [timestamp_str]
+    matched = 0
+    
     for col in ALL_COLUMNS[1:]:
         if col == "Cyclone_Present":
             row.append(0)
         elif col in fetched:
             row.append(fetched[col])
+            matched += 1
         else:
-            # 填補缺失值
             if "AQHI" in col: row.append(round(means["AQHI"]))
             elif "HUM" in col: row.append(round(means["HUM"], 1))
             elif "WSPD" in col: row.append(round(means["WSPD"], 1))
-            elif "PDIR" in col: row.append(round(means["PDIR"], 1))
+            elif "PDIR" in col: row.append(means["PDIR"])
             else: row.append(0.0)
 
-    # 2. 寫入 CSV (保留歷史紀錄)
+    # 寫入 CSV
     file_exists = os.path.isfile(CSV_FILE)
     with open(CSV_FILE, "a", encoding="utf-8") as f:
         if not file_exists:
             f.write(",".join(ALL_COLUMNS) + "\n")
         f.write(",".join(map(str, row)) + "\n")
-    print(f"📝 CSV 已更新: {CSV_FILE}")
+    
+    upload_to_firebase(row, timestamp_str)
 
-    # 3. 同步至 Firebase (更新當前狀態)
-    upload_to_firebase(fetched, means, now)
+    print(f"\n--- [📊 執行完成] ---")
+    print(f"時間: {timestamp_str}")
+    print(f"匹配成功: {matched} / {len(ALL_COLUMNS)-1} 欄位")
+    print(f"CSV 已更新: {CSV_FILE}")
 
 if __name__ == "__main__":
     run()
