@@ -166,6 +166,7 @@ def run():
     row = [timestamp_str]
     matched = 0
     
+    # 建立數據列
     for col in ALL_COLUMNS[1:]:
         if col == "Cyclone_Present": row.append(0)
         elif col in fetched:
@@ -178,16 +179,32 @@ def run():
             elif "PDIR" in col: row.append(means["PDIR"])
             else: row.append(0.0)
 
-    # --- 修正處：確保以下邏輯在 run() 函數內 ---
+    # --- [修正後的寫入邏輯：安全重置 Header] ---
     file_exists = os.path.isfile(CSV_FILE)
-    with open(CSV_FILE, "a", encoding="utf-8") as f:
-        if not file_exists:
+    header_mismatch = False
+    
+    if file_exists:
+        try:
+            temp_df = pd.read_csv(CSV_FILE, nrows=0)
+            if len(temp_df.columns) != len(ALL_COLUMNS):
+                header_mismatch = True
+        except:
+            header_mismatch = True
+
+    if not file_exists or header_mismatch:
+        # 如果檔案不存在或欄位數量不對，重新建立檔案並寫入 Header
+        print(f"⚠️ 欄位不匹配或檔案不存在，正在重置 {CSV_FILE}...")
+        with open(CSV_FILE, "w", encoding="utf-8") as f:
             f.write(",".join(ALL_COLUMNS) + "\n")
-        f.write(",".join(map(str, row)) + "\n")
+            f.write(",".join(map(str, row)) + "\n")
+    else:
+        # 欄位正確，正常添加新數據
+        with open(CSV_FILE, "a", encoding="utf-8") as f:
+            f.write(",".join(map(str, row)) + "\n")
     
     upload_to_firebase(row, timestamp_str)
     save_aqhi_levels_to_firebase(risk_levels, timestamp_str)
-    print(f"✅ [📊 執行完成] 匹配成功: {matched} 欄位")
+    print(f"✅ [📊 執行完成] 數據已存入 CSV，總欄位: {len(row)}")
 
 if __name__ == "__main__":
     run() 
