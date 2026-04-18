@@ -4,12 +4,12 @@ import requests
 import xml.etree.ElementTree as ET
 import os
 import re
-import pandas as pd
 from datetime import datetime, timedelta, timezone
 
 # ====================== [配置] ======================
 FIREBASE_URL = "https://project-12cc8-default-rtdb.asia-southeast1.firebasedatabase.app/"
-SERVICE_ACCOUNT_PATH = "serviceAccountKey.json"
+SERVICE_ACCOUNT_PATH = "serviceAccountKey.json"   # 沒有就忽略 Firebase 錯誤
+
 CSV_FILE = "aqhi_history.csv"
 HKT = timezone(timedelta(hours=8))
 
@@ -17,6 +17,7 @@ AQHI_URL = "https://www.aqhi.gov.hk/epd/ddata/html/out/aqhi_ind_rss_Eng.xml"
 WIND_URL = "https://data.weather.gov.hk/weatherAPI/hko_data/regional-weather/latest_10min_wind_uc.csv"
 WEATHER_JSON_URL = "https://data.weather.gov.hk/weatherAPI/opendata/weather.php?dataType=rhrread&lang=tc"
 
+# ====================== 最終加強版 STATION_MAP ======================
 STATION_MAP = {
     "橫瀾島": "BHD", "長洲": "CCH", "長洲泳灘": "CCB", "中環碼頭": "CP1", "中環": "CP1", "青洲": "GI",
     "赤鱲角": "HKA", "黃竹坑": "HKS", "將軍澳": "JKB", "京士柏": "KP", "南丫島": "LAM",
@@ -26,7 +27,15 @@ STATION_MAP = {
     "大埔滘": "TPK", "屯門": "TUN", "大老山": "WGL", "濕地公園": "WLP", "天文台": "HKO",
     "九龍城": "KSC", "大帽山": "TMS", "青衣": "TYW", "元朗": "YCT", 
     "香港航海學校": "SSH", "航海學校": "SSH",
-    "啟德": "KT", "赤柱": "STAN", "塔門": "TAP"
+    "啟德": "KT", "赤柱": "STAN", "塔門": "TAP",
+
+    # 官方最新風速站點精準對應（2026年4月）
+    "中環碼頭": "CP1", "赤鱲角": "HKA", "長洲": "CCH", "長洲泳灘": "CCB", "青洲": "GI",
+    "香港航海學校": "SSH", "啟德": "KT", "京士柏": "KP", "南丫島": "LAM", "流浮山": "LFS",
+    "昂坪": "NGP", "北角": "NP", "坪洲": "PEN", "西貢": "SKG", "沙洲": "SC",
+    "沙田": "SHA", "石崗": "SEK", "赤柱": "STAN", "天星碼頭": "SF", "打鼓嶺": "TKL",
+    "大美督": "TME", "大埔滘": "TPK", "塔門": "TAP", "大老山": "WGL", "將軍澳": "JKB",
+    "青衣": "TYW", "屯門": "TUN", "橫瀾島": "BHD", "濕地公園": "WLP", "黃竹坑": "HKS"
 }
 
 ALL_COLUMNS = [
@@ -47,99 +56,190 @@ ALL_COLUMNS = [
 ]
 
 def wind_text_to_degrees(text):
-    if not text or any(x in str(text) for x in ["0.0", "不定", "N/A", "Variable", "無風"]): return 0.0
+    if not text or any(x in str(text) for x in ["0.0", "不定", "N/A", "Variable", "無風"]):
+        return 0.0
     mapping = {"北": 0, "北北東": 22.5, "東北": 45, "東北東": 67.5, "東": 90, "東南東": 112.5,
                "東南": 135, "南南東": 157.5, "南": 180, "南南西": 202.5, "西南": 225,
                "西南西": 247.5, "西": 270, "西北西": 292.5, "西北": 315, "北西北": 337.5}
     return mapping.get(str(text).strip(), 0.0)
 
 def fetch_data():
-    fetched, risk_levels = {}, {}
+    print("\n--- [🔍 API 檢測開始] ---")
+    fetched = {}
+    risk_levels = {} # ⬅️ 儲存文字等級 (e.g., "Very High")
     vals = {"aqhi": [], "hum": [], "wspd": [], "pdir": []}
+
+    # 1. AQHI
     try:
         r = requests.get(AQHI_URL, timeout=10)
-        root = ET.fromstring(re.sub(r'\sxmlns="[^"]+"', '', r.text))
+        xml_text = re.sub(r'\sxmlns="[^"]+"', '', r.text)
+        root = ET.fromstring(xml_text)
         for item in root.findall(".//item"):
             title = (item.find("title").text or "")
             desc = (item.find("description").text or "")
             pure_name = title.split('-')[0].strip().replace("Roadside", "").replace("General Stations", "").strip()
+            
+            # 🛠️ 捕捉數字 (\d+) 和 等級文字 ([a-zA-Z\s]+)
             val_match = re.search(r'(\d+)\s+([a-zA-Z\s]+)\s+-', desc, re.IGNORECASE)
+            
             if val_match:
                 val = int(val_match.group(1))
-                fetched[f"AQHI_{pure_name}"] = val
-                # 修復 1：清理 Firebase Key 中的非法字元
-                safe_risk_key = pure_name.replace("/", "_").replace(".", "_")
-                risk_levels[safe_risk_key] = val_match.group(2).strip()
-                vals["aqhi"].append(val)
-    except: pass
+                level_text = val_match.group(2).strip() # 取得等級文字
+                
+                key = f"AQHI_{pure_name}"
+                if key in ALL_COLUMNS:
+                    fetched[key] = val
+                    risk_levels[pure_name] = level_text # 存入字典
+                    vals["aqhi"].append(val)
+                    print(f"✅ [AQHI] {pure_name}: {val} ({level_text})")
+    except Exception as e:
+        print(f"❌ AQHI 錯誤: {e}")
+
+    # 2. Wind CSV（精準匹配）
     try:
         r = requests.get(WIND_URL, timeout=15)
         lines = r.content.decode('utf-8').strip().split('\n')
+        wind_count = 0
         for line in lines[1:]:
             cols = [v.strip() for v in line.rstrip(',').split(',')]
             if len(cols) < 4: continue
+            site = cols[1]
+            deg = wind_text_to_degrees(cols[2])
+            try: spd = float(cols[3])
+            except: spd = 0.0
+
+            matched = False
             for cn, sid in STATION_MAP.items():
-                if cols[1] == cn:
-                    fetched[f"PDIR_{sid}"] = wind_text_to_degrees(cols[2])
-                    fetched[f"WSPD_{sid}"] = float(cols[3])
+                if site == cn or site.replace(" ", "") == cn.replace(" ", ""):
+                    fetched[f"PDIR_{sid}"] = deg
+                    fetched[f"WSPD_{sid}"] = spd
+                    vals["pdir"].append(deg)
+                    vals["wspd"].append(spd)
+                    wind_count += 1
+                    matched = True
                     break
-    except: pass
+            if not matched:
+                pass # 隱藏未匹配風站印出，保持乾淨
+        print(f"✅ [風力] 已成功抓取 {wind_count} 個站點數據")
+    except Exception as e:
+        print(f"❌ Wind 錯誤: {e}")
+
+    # 3. Humidity JSON (強化版：數據廣播)
     try:
         r = requests.get(WEATHER_JSON_URL)
-        h_data = r.json().get('humidity', {}).get('data', [])
-        global_hum = h_data[0]['value'] if h_data else 80.0
+        data = r.json()
+        h_data = data.get('humidity', {}).get('data', [])
+        
+        # 獲取一個全港通用的基準濕度 (例如 94%)
+        global_hum = h_data[0]['value'] if h_data else 94.0
+        
+        # 先用這個基準值填滿所有 HUM 欄位
         for col in ALL_COLUMNS:
-            if col.startswith("HUM_"): fetched[col] = float(global_hum)
-    except: pass
-    
-    means = {"AQHI": 3.0, "HUM": 80.0, "WSPD": 5.0, "PDIR": 225.0}
-    return fetched, means, risk_levels
+            if col.startswith("HUM_"):
+                fetched[col] = float(global_hum)
+        
+        # 如果 API 有提供特定站點，再進行覆蓋
+        for item in h_data:
+            place = item.get('place', '')
+            val = float(item.get('value', 0))
+            vals["hum"].append(val)
+            for cn, sid in STATION_MAP.items():
+                if cn in place:
+                    fetched[f"HUM_{sid}"] = val
+        print(f"✅ [濕度廣播] 已將基準濕度 {global_hum}% 應用於所有濕度監測點")
+    except Exception as e: print(f"❌ Humidity 錯誤: {e}")
 
+    # 計算基準
+    means = {
+        "AQHI": round(sum(vals["aqhi"])/len(vals["aqhi"]), 1) if vals["aqhi"] else 3.0,
+        "HUM": round(sum(vals["hum"])/len(vals["hum"]), 1) if vals["hum"] else 80.0,
+        "WSPD": round(sum(vals["wspd"])/len(vals["wspd"]), 1) if vals["wspd"] else 8.0,
+        "PDIR": 225.0
+    }
+    print(f"💡 [計算基準] AQHI:{means['AQHI']}, HUM:{means['HUM']}, WSPD:{means['WSPD']}")
+
+    missing = [col for col in ALL_COLUMNS[1:] if col not in fetched and col != "Cyclone_Present"]
+    print(f"⚠️ 仍有 {len(missing)} 個欄位未匹配（預期：主要是 HUM_ 欄位）")
+
+    return fetched, means, risk_levels # ⬅️ 回傳 risk_levels
+
+# ====================== Firebase & run ======================
 if not firebase_admin._apps:
-    cred = credentials.Certificate(SERVICE_ACCOUNT_PATH)
-    firebase_admin.initialize_app(cred, {'databaseURL': FIREBASE_URL})
-
-def auto_clean_and_align_csv(file_path):
     try:
-        df = pd.read_csv(file_path)
-        # 修復 2：使用 format='mixed' 或自動推斷來解析包含時分的時間字符串
-        df['Date'] = pd.to_datetime(df['Date'], errors='coerce').dt.floor('H')
-        df = df.dropna(subset=['Date'])
-        df = df.drop_duplicates(subset=['Date'], keep='last').set_index('Date')
-        full_range = pd.date_range(start=df.index.min(), end=df.index.max(), freq='H')
-        df_aligned = df.reindex(full_range).ffill().bfill()
-        df_aligned.reset_index().rename(columns={'index': 'Date'}).to_csv(file_path, index=False)
-    except Exception as e: print(f"Clean Error: {e}")
+        cred = credentials.Certificate(SERVICE_ACCOUNT_PATH)
+        firebase_admin.initialize_app(cred, {'databaseURL': FIREBASE_URL})
+        print("🔥 Firebase 初始化成功")
+    except:
+        print("⚠️ Firebase 初始化失敗（可忽略）")
+
+def upload_to_firebase(row, timestamp_str):
+    try:
+        ref = db.reference(f"aqhi_history/{timestamp_str.replace(' ', '_').replace(':', '-')}")
+        
+        # 🛠️ 修復 2：將 ALL_COLUMNS 裡面的 "/" 替換成 "_"，避免 Firebase 報錯
+        safe_keys = [k.replace("/", "_") for k in ALL_COLUMNS]
+        data_dict = dict(zip(safe_keys, row))
+        
+        ref.set(data_dict)
+        print(f"✅ Firebase 歷史數據上傳成功 → {timestamp_str}")
+    except Exception as e:
+        print(f"⚠️ Firebase 歷史數據上傳失敗: {e}（可忽略）")
+
+def save_aqhi_levels_to_firebase(risk_levels, timestamp_str):
+    """
+    專門儲存各區風險等級文字到 GAGNN_24hours/GAGNN_data/readings
+    """
+    if not risk_levels:
+        return
+    try:
+        ref = db.reference("GAGNN_24hours/GAGNN_data/readings")
+        data_to_save = {
+            "last_update": timestamp_str,
+            "station_levels": risk_levels
+        }
+        ref.set(data_to_save)
+        print(f"✅ AQHI 風險等級文字已同步至: GAGNN_24hours/GAGNN_data/readings")
+    except Exception as e:
+        print(f"⚠️ 無法同步風險等級文字: {e}")
 
 def run():
     now = datetime.now(HKT)
     timestamp_str = now.strftime("%Y-%m-%d %H:%M")
-    fetched, means, risk_levels = fetch_data()
+    fetched, means, risk_levels = fetch_data() # ⬅️ 接收 risk_levels
     
     row = [timestamp_str]
+    matched = 0
+    
     for col in ALL_COLUMNS[1:]:
-        if col == "Cyclone_Present": row.append(0)
-        else: row.append(fetched.get(col, round(means.get(col.split('_')[0], 0), 1)))
+        if col == "Cyclone_Present":
+            row.append(0)
+        elif col in fetched:
+            row.append(fetched[col])
+            matched += 1
+        else:
+            if "AQHI" in col: row.append(round(means["AQHI"]))
+            elif "HUM" in col: row.append(round(means["HUM"], 1))
+            elif "WSPD" in col: row.append(round(means["WSPD"], 1))
+            elif "PDIR" in col: row.append(means["PDIR"])
+            else: row.append(0.0)
 
+    # 寫入 CSV
     file_exists = os.path.isfile(CSV_FILE)
-    write_header = not file_exists
-    if file_exists:
-        try:
-            if len(pd.read_csv(CSV_FILE, nrows=0).columns) != len(ALL_COLUMNS):
-                write_header = True
-        except: write_header = True
-
-    mode = "w" if write_header else "a"
-    with open(CSV_FILE, mode, encoding="utf-8") as f:
-        if write_header: f.write(",".join(ALL_COLUMNS) + "\n")
+    with open(CSV_FILE, "a", encoding="utf-8") as f:
+        if not file_exists:
+            f.write(",".join(ALL_COLUMNS) + "\n")
         f.write(",".join(map(str, row)) + "\n")
     
-    # Firebase 上傳時也確保 Key 是安全的
-    safe_data = {k.replace("/", "_").replace(".", "_"): v for k, v in zip(ALL_COLUMNS, row)}
-    db.reference(f"aqhi_history/{timestamp_str.replace(' ', '_').replace(':', '-')}") \
-      .set(safe_data)
-    db.reference("GAGNN_24hours/GAGNN_data/readings").set({"last_update": timestamp_str, "station_levels": risk_levels})
+    # 執行上傳歷史數據 (GNN 模型用的數字陣列)
+    upload_to_firebase(row, timestamp_str)
+    
+    # 執行上傳即時等級 (App 儀表板用的文字狀態)
+    save_aqhi_levels_to_firebase(risk_levels, timestamp_str)
+
+    print(f"\n--- [📊 執行完成] ---")
+    print(f"時間: {timestamp_str}")
+    print(f"匹配成功: {matched} / {len(ALL_COLUMNS)-1} 欄位")
+    print(f"CSV 已更新: {CSV_FILE}")
 
 if __name__ == "__main__":
     run()
-    auto_clean_and_align_csv(CSV_FILE)
