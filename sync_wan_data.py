@@ -66,6 +66,7 @@ def wind_text_to_degrees(text):
 def fetch_data():
     print("\n--- [🔍 API 檢測開始] ---")
     fetched = {}
+    risk_levels = {} # ⬅️ 儲存文字等級 (e.g., "Very High")
     vals = {"aqhi": [], "hum": [], "wspd": [], "pdir": []}
 
     # 1. AQHI
@@ -78,16 +79,19 @@ def fetch_data():
             desc = (item.find("description").text or "")
             pure_name = title.split('-')[0].strip().replace("Roadside", "").replace("General Stations", "").strip()
             
-            # 🛠️ 修復 1：加入 re.IGNORECASE，讓它無視大小寫，完美捕捉 "Very high"
-            val_match = re.search(r'(\d+)\s+(Low|Moderate|High|Very High|Serious)', desc, re.IGNORECASE)
+            # 🛠️ 捕捉數字 (\d+) 和 等級文字 ([a-zA-Z\s]+)
+            val_match = re.search(r'(\d+)\s+([a-zA-Z\s]+)\s+-', desc, re.IGNORECASE)
             
             if val_match:
                 val = int(val_match.group(1))
+                level_text = val_match.group(2).strip() # 取得等級文字
+                
                 key = f"AQHI_{pure_name}"
                 if key in ALL_COLUMNS:
                     fetched[key] = val
+                    risk_levels[pure_name] = level_text # 存入字典
                     vals["aqhi"].append(val)
-                    print(f"✅ [AQHI] {pure_name}: {val}")
+                    print(f"✅ [AQHI] {pure_name}: {val} ({level_text})")
     except Exception as e:
         print(f"❌ AQHI 錯誤: {e}")
 
@@ -115,7 +119,7 @@ def fetch_data():
                     matched = True
                     break
             if not matched:
-                print(f"   未匹配風站: {site}")
+                pass # 隱藏未匹配風站印出，保持乾淨
         print(f"✅ [風力] 已成功抓取 {wind_count} 個站點數據")
     except Exception as e:
         print(f"❌ Wind 錯誤: {e}")
@@ -157,7 +161,7 @@ def fetch_data():
     missing = [col for col in ALL_COLUMNS[1:] if col not in fetched and col != "Cyclone_Present"]
     print(f"⚠️ 仍有 {len(missing)} 個欄位未匹配（預期：主要是 HUM_ 欄位）")
 
-    return fetched, means
+    return fetched, means, risk_levels # ⬅️ 回傳 risk_levels
 
 # ====================== Firebase & run ======================
 if not firebase_admin._apps:
@@ -177,14 +181,31 @@ def upload_to_firebase(row, timestamp_str):
         data_dict = dict(zip(safe_keys, row))
         
         ref.set(data_dict)
-        print(f"✅ Firebase 上傳成功 → {timestamp_str}")
+        print(f"✅ Firebase 歷史數據上傳成功 → {timestamp_str}")
     except Exception as e:
-        print(f"⚠️ Firebase 上傳失敗: {e}（可忽略）")
+        print(f"⚠️ Firebase 歷史數據上傳失敗: {e}（可忽略）")
+
+def save_aqhi_levels_to_firebase(risk_levels, timestamp_str):
+    """
+    專門儲存各區風險等級文字到 GAGNN_24hours/GAGNN_data/readings
+    """
+    if not risk_levels:
+        return
+    try:
+        ref = db.reference("GAGNN_24hours/GAGNN_data/readings")
+        data_to_save = {
+            "last_update": timestamp_str,
+            "station_levels": risk_levels
+        }
+        ref.set(data_to_save)
+        print(f"✅ AQHI 風險等級文字已同步至: GAGNN_24hours/GAGNN_data/readings")
+    except Exception as e:
+        print(f"⚠️ 無法同步風險等級文字: {e}")
 
 def run():
     now = datetime.now(HKT)
     timestamp_str = now.strftime("%Y-%m-%d %H:%M")
-    fetched, means = fetch_data()
+    fetched, means, risk_levels = fetch_data() # ⬅️ 接收 risk_levels
     
     row = [timestamp_str]
     matched = 0
@@ -209,7 +230,11 @@ def run():
             f.write(",".join(ALL_COLUMNS) + "\n")
         f.write(",".join(map(str, row)) + "\n")
     
+    # 執行上傳歷史數據 (GNN 模型用的數字陣列)
     upload_to_firebase(row, timestamp_str)
+    
+    # 執行上傳即時等級 (App 儀表板用的文字狀態)
+    save_aqhi_levels_to_firebase(risk_levels, timestamp_str)
 
     print(f"\n--- [📊 執行完成] ---")
     print(f"時間: {timestamp_str}")
