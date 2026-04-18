@@ -27,10 +27,15 @@ jobs:
           pip install firebase-admin requests pandas
           echo "✅ Dependencies installed successfully."
 
+      - name: 🔑 Create Firebase Service Account Key
+        run: |
+          # 從 GitHub Secrets 讀取內容並寫入實體檔案
+          echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' > serviceAccountKey.json
+        
       - name: Run sync script
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-          RENDER_GNN_API: ${{ secrets.RENDER_GNN_API }}  # <--- 確保這行存在
+          RENDER_GNN_API: ${{ secrets.RENDER_GNN_API }}
         run: python sync_wan_data.py
 
       - name: 💾 Commit and Push history CSV
