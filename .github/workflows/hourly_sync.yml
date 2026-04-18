@@ -29,12 +29,15 @@ jobs:
 
       - name: 🔑 Create Firebase Service Account Key
         run: |
-          # 從 GitHub Secrets 讀取內容並寫入實體檔案
-          echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' > serviceAccountKey.json
+          # 使用 cat EOF 方式可以避免 JSON 內部的特殊字元造成 echo 錯誤
+          cat <<EOF > serviceAccountKey.json
+          ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          EOF
         
       - name: Run sync script
         env:
-          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          # 這裡維持 env 設定沒問題，雖然 script 主要是讀取上面的 json 檔
+          FIREBASE_SERVICE_ACCOUNT_STR: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           RENDER_GNN_API: ${{ secrets.RENDER_GNN_API }}
         run: python sync_wan_data.py
 
@@ -45,6 +48,7 @@ jobs:
           
           if [ -f aqhi_history.csv ]; then
             git add aqhi_history.csv
+            # 使用 git commit || true 避免在沒有資料更新時導致 workflow 報錯失敗
             git commit -m "Auto-update hourly history: $(date)" || echo "No changes to commit"
             git pull --rebase origin main
             git push origin main
