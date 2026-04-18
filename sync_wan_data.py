@@ -13,9 +13,6 @@ SERVICE_ACCOUNT_PATH = "serviceAccountKey.json"
 CSV_FILE = "aqhi_history.csv"
 HKT = timezone(timedelta(hours=8))
 
-# Headers 模擬瀏覽器，防止被 HKO 封鎖
-HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-
 AQHI_URL = "https://www.aqhi.gov.hk/epd/ddata/html/out/aqhi_ind_rss_Eng.xml"
 WIND_URL = "https://data.weather.gov.hk/weatherAPI/hko_data/regional-weather/latest_10min_wind_uc.csv"
 WEATHER_JSON_URL = "https://data.weather.gov.hk/weatherAPI/opendata/weather.php?dataType=rhrread&lang=tc"
@@ -59,9 +56,9 @@ def fetch_data():
     fetched, risk_levels = {}, {}
     vals = {"aqhi": [], "hum": [], "wspd": [], "pdir": []}
     
-    # AQHI
+    # 1. AQHI Data
     try:
-        r = requests.get(AQHI_URL, timeout=10, headers=HEADERS)
+        r = requests.get(AQHI_URL, timeout=10)
         root = ET.fromstring(re.sub(r'\sxmlns="[^"]+"', '', r.text))
         for item in root.findall(".//item"):
             title = (item.find("title").text or "")
@@ -74,11 +71,11 @@ def fetch_data():
                 safe_key = pure_name.replace("/", "_")
                 risk_levels[safe_key] = val_match.group(2).strip()
                 vals["aqhi"].append(val)
-    except: pass
+    except: print("⚠️ AQHI Fetch Failed")
 
-    # Wind (HKO CSV)
+    # 2. Wind Data
     try:
-        r = requests.get(WIND_URL, timeout=15, headers=HEADERS)
+        r = requests.get(WIND_URL, timeout=15)
         lines = r.content.decode('utf-8').strip().split('\n')
         for line in lines[1:]:
             cols = [v.strip() for v in line.rstrip(',').split(',')]
@@ -88,17 +85,22 @@ def fetch_data():
                     fetched[f"PDIR_{sid}"] = wind_text_to_degrees(cols[2])
                     fetched[f"WSPD_{sid}"] = float(cols[3])
                     vals["wspd"].append(float(cols[3]))
+                    vals["pdir"].append(wind_text_to_degrees(cols[2]))
                     break
-    except: pass
+    except: print("⚠️ Wind Fetch Failed")
 
-    # Humidity
+    # 3. Humidity Data
     try:
-        r = requests.get(WEATHER_JSON_URL, headers=HEADERS)
+        r = requests.get(WEATHER_JSON_URL)
         h_data = r.json().get('humidity', {}).get('data', [])
         global_hum = float(h_data[0]['value']) if h_data else 80.0
         for col in ALL_COLUMNS:
             if col.startswith("HUM_"): fetched[col] = global_hum
-    except: pass
+        for item in h_data:
+            for cn, sid in STATION_MAP.items():
+                if cn in item.get('place', ''):
+                    fetched[f"HUM_{sid}"] = float(item.get('value', global_hum))
+    except: print("⚠️ Humidity Fetch Failed")
     
     means = {
         "AQHI": sum(vals["aqhi"])/len(vals["aqhi"]) if vals["aqhi"] else 3.0,
@@ -109,20 +111,22 @@ def fetch_data():
     return fetched, means, risk_levels
 
 if not firebase_admin._apps:
-    cred = credentials.Certificate(SERVICE_ACCOUNT_PATH)
-    firebase_admin.initialize_app(cred, {'databaseURL': FIREBASE_URL})
+    try:
+        cred = credentials.Certificate(SERVICE_ACCOUNT_PATH)
+        firebase_admin.initialize_app(cred, {'databaseURL': FIREBASE_URL})
+    except: print("⚠️ Firebase Init Failed")
 
 def auto_clean_and_align_csv(file_path):
     try:
         if not os.path.exists(file_path): return
         df = pd.read_csv(file_path)
-        # 修正：'H' -> 'h' 以適應新版 Pandas
-        df['Date'] = pd.to_datetime(df['Date'], errors='coerce').dt.floor('h')
+        df['Date'] = pd.to_datetime(df['Date'], errors='coerce').dt.floor('H')
         df = df.dropna(subset=['Date']).drop_duplicates(subset=['Date'], keep='last').set_index('Date')
-        full_range = pd.date_range(start=df.index.min(), end=df.index.max(), freq='h')
+        full_range = pd.date_range(start=df.index.min(), end=df.index.max(), freq='H')
         df_aligned = df.reindex(full_range).ffill().bfill()
         df_aligned.reset_index().rename(columns={'index': 'Date'}).to_csv(file_path, index=False)
-    except Exception as e: print(f"Clean Error: {e}")
+        print("✅ CSV Aligned to Hourly Frequency.")
+    except Exception as e: print(f"❌ Clean Error: {e}")
 
 def run():
     now = datetime.now(HKT)
@@ -137,24 +141,27 @@ def run():
             m_key = col.split('_')[0]
             row.append(round(means.get(m_key, 0), 1))
 
-    # 檢查 CSV 是否需要重置 (欄位數量對齊)
+    # Header Integrity Check
     file_exists = os.path.isfile(CSV_FILE)
-    reset = False
+    reset_file = False
     if file_exists:
         try:
-            if len(pd.read_csv(CSV_FILE, nrows=0).columns) != len(ALL_COLUMNS): reset = True
-        except: reset = True
+            if len(pd.read_csv(CSV_FILE, nrows=0).columns) != len(ALL_COLUMNS): reset_file = True
+        except: reset_file = True
 
-    with open(CSV_FILE, "w" if (not file_exists or reset) else "a", encoding="utf-8") as f:
-        if not file_exists or reset: f.write(",".join(ALL_COLUMNS) + "\n")
+    with open(CSV_FILE, "w" if (not file_exists or reset_file) else "a", encoding="utf-8") as f:
+        if not file_exists or reset_file: f.write(",".join(ALL_COLUMNS) + "\n")
         f.write(",".join(map(str, row)) + "\n")
     
-    # Firebase Upload
+    # Firebase Upload with Key Sanitization
     safe_data = {k.replace("/", "_"): v for k, v in zip(ALL_COLUMNS, row)}
-    db.reference(f"aqhi_history/{timestamp_str.replace(' ', '_').replace(':', '-')}") \
-      .set(safe_data)
-    db.reference("GAGNN_24hours/GAGNN_data/readings").set({"last_update": timestamp_str, "station_levels": risk_levels})
-    print(f"✅ Firebase Sync: {timestamp_str}")
+    try:
+        db.reference(f"aqhi_history/{timestamp_str.replace(' ', '_').replace(':', '-')}") \
+          .set(safe_data)
+        db.reference("GAGNN_24hours/GAGNN_data/readings") \
+          .set({"last_update": timestamp_str, "station_levels": risk_levels})
+        print(f"✅ Firebase Sync Success: {timestamp_str}")
+    except Exception as e: print(f"❌ Firebase Error: {e}")
 
 if __name__ == "__main__":
     run()
