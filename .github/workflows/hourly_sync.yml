@@ -36,10 +36,20 @@ jobs:
         
       - name: Run sync script
         env:
-          # 這裡維持 env 設定沒問題，雖然 script 主要是讀取上面的 json 檔
-          FIREBASE_SERVICE_ACCOUNT_STR: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           RENDER_GNN_API: ${{ secrets.RENDER_GNN_API }}
         run: python sync_wan_data.py
+
+      - name: 🚀 Notify Render to Predict
+        run: |
+          # 從清洗後的 CSV 提取最後一筆數據並轉為 JSON 格式
+          # 我們過濾掉 Date 欄位，只傳送數值給模型
+          LATEST_JSON=$(python -c "import pandas as pd; df=pd.read_csv('aqhi_history.csv'); print(df.iloc[-1, 1:].to_json())")
+          
+          echo "📡 發送最新數據至 Render 推理引擎..."
+          curl -X POST https://your-render-app-name.onrender.com/predict \
+               -H "Content-Type: application/json" \
+               -d "{\"data\": $LATEST_JSON}"
 
       - name: 💾 Commit and Push history CSV
         run: |
