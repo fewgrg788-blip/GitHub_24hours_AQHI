@@ -4,6 +4,7 @@ import requests
 import xml.etree.ElementTree as ET
 import os
 import re
+import pandas as pd
 from datetime import datetime, timedelta, timezone
 
 # ====================== [配置] ======================
@@ -223,6 +224,31 @@ def run():
             elif "PDIR" in col: row.append(means["PDIR"])
             else: row.append(0.0)
 
+def auto_clean_and_align_csv(file_path):
+    print(f"🧹 [Cleaning] 正在自動對齊時間軸並填充缺失小時...")
+    try:
+        df = pd.read_csv(file_path)
+        # 1. 統一時間格式並捨去分秒，只留整點
+        df['Date'] = pd.to_datetime(df['Date']).dt.floor('H')
+        
+        # 2. 去除重複的小時（保留最後一筆，預防手動運行衝突）
+        df = df.drop_duplicates(subset=['Date'], keep='last').set_index('Date')
+        
+        # 3. 建立標準整點索引（從第一筆到現在，每小時一個點）
+        # 這能解決 GitHub Action 跳過 1-2 小時的問題
+        full_range = pd.date_range(start=df.index.min(), end=df.index.max(), freq='H')
+        
+        # 4. 重新對齊並使用 ffill (前向填充) 補齊缺失的小時數據
+        df_aligned = df.reindex(full_range).ffill().bfill()
+        
+        # 5. 回寫 CSV
+        df_aligned.reset_index().rename(columns={'index': 'Date'}).to_csv(file_path, index=False)
+        print(f"✅ [Cleaning] 清洗完成，目前數據庫共有 {len(df_aligned)} 筆連續整點記錄")
+        return df_aligned.iloc[-1].to_dict() # 回傳最新的一行數據供 API 使用
+    except Exception as e:
+        print(f"❌ [Cleaning] 發生錯誤: {e}")
+        return None
+
     # 寫入 CSV
     file_exists = os.path.isfile(CSV_FILE)
     with open(CSV_FILE, "a", encoding="utf-8") as f:
@@ -242,4 +268,5 @@ def run():
     print(f"CSV 已更新: {CSV_FILE}")
 
 if __name__ == "__main__":
-    run()
+    run() # 執行原本的數據採集
+    last_row = auto_clean_and_align_csv(CSV_FILE) # 執行清洗
