@@ -44,10 +44,12 @@ jobs:
         run: python sync_wan_data.py
 
       - name: 🚀 Notify Render to Predict
-        if: success() # 只有同步成功才執行預測
+        if: success()
         run: |
-          LATEST_JSON=$(python -c "import pandas as pd; df=pd.read_csv('aqhi_history.csv'); print(df.iloc[-1, 1:].to_json())")
-          echo "📡 Sending data to Render..."
+          # 修正這裡：將 aqhi_history.csv 改為 aqhi_history_today.csv
+          LATEST_JSON=$(python -c "import pandas as pd; df=pd.read_csv('aqhi_history_today.csv'); print(df.iloc[-1, 1:].to_json())")
+          
+          echo "📡 發送最新數據至 Render..."
           curl -X POST ${{ secrets.RENDER_GNN_API }}/predict \
                -H "Content-Type: application/json" \
                -d "{\"data\": $LATEST_JSON}"
@@ -57,7 +59,10 @@ jobs:
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add aqhi_history.csv
-          git commit -m "Auto-update: $(date) [skip ci]" || echo "No changes to commit"
+          
+          # 同時追蹤這兩個檔案
+          git add aqhi_history_today.csv aqhi_history_2026.csv
+          
+          git commit -m "🤖 自動更新數據: $(date) [skip ci]" || echo "無變動"
           git pull --rebase origin main
           git push origin main
