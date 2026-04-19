@@ -230,7 +230,7 @@ def auto_wash_csv(file_path):
         
         # 6. 回寫 CSV
         df.index.name = 'Date'
-        df.reset_index().to_csv(file_path, index=False)
+        df.reset_index().to_csv(file_path, index=False, date_format='%Y-%m-%d %H:00')
         print(f"✨ [Auto Wash] CSV 已完成清洗、補齊與整點對齊")
     except Exception as e:
         print(f"⚠️ Auto Wash 失敗: {e}")
@@ -271,7 +271,7 @@ def fill_missing_hours_before_run(file_path):
             df[aqhi_cols] = df[aqhi_cols].clip(1, 11).round(0)
             
             df.index.name = 'Date'
-            df.reset_index().to_csv(file_path, index=False)
+            df.reset_index().to_csv(file_path, index=False, date_format='%Y-%m-%d %H:00')
             print(f"✅ 成功將舊數據複製並補齊至 {target_end}")
         else:
             print("✅ 啟動檢查：時間軸連續，無須複製補齊。")
@@ -282,7 +282,7 @@ def fill_missing_hours_before_run(file_path):
 
 def run():
     now = datetime.now(HKT)
-    timestamp_str = now.strftime("%Y-%m-%d %H:%M")
+    timestamp_str = now.strftime("%Y-%m-%d %H:00")
     fetched, means, risk_levels = fetch_data() # ⬅️ 接收 risk_levels
     
     row = [timestamp_str]
