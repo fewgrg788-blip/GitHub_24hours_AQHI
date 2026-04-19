@@ -102,6 +102,8 @@ def fetch_data():
                     
                     vals["aqhi"].append(val)
                     print(f"✅ [AQHI] {pure_name}: {val} ({level_text})")
+            except Exception as e:
+                print(f"❌ AQHI 錯誤: {e}")
 
     # 2. Wind CSV（精準匹配）
     try:
