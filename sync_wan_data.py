@@ -6,11 +6,11 @@ import os
 import re
 import pandas as pd
 import numpy as np
+import glob
 from datetime import datetime, timedelta, timezone
 
 # ====================== [配置] ======================
-CSV_FILE = "aqhi_history.csv"        # 這是「今日快取」，只存今天
-HISTORY_FILE = "aqhi_history_final.csv"  # 這是「歷史大檔」，供訓練使用
+CSV_FILE = "aqhi_history_today.csv"  # 改名為 today 以免跟舊檔案混淆
 
 FIREBASE_URL = "https://project-12cc8-default-rtdb.asia-southeast1.firebasedatabase.app/"
 SERVICE_ACCOUNT_PATH = "serviceAccountKey.json"   # 沒有就忽略 Firebase 錯誤
@@ -328,6 +328,26 @@ def run():
     # Firebase 同步
     upload_to_firebase(row, timestamp_str)
     save_aqhi_levels_to_firebase(risk_levels, timestamp_str)
+
+
+def get_full_history_dataframe():
+    """
+    自動抓取目錄下所有的 aqhi_history_20*.csv 並合併成一個 DataFrame
+    """
+    all_files = sorted(glob.glob("aqhi_history_20*.csv"))
+    print(f"📚 正在讀取並合併以下年度檔案: {all_files}")
+    
+    df_list = []
+    for filename in all_files:
+        df_temp = pd.read_csv(filename)
+        df_list.append(df_temp)
+    
+    full_df = pd.concat(df_list, ignore_index=True)
+    # 確保日期排序正確
+    full_df['Date'] = pd.to_datetime(full_df['Date'])
+    full_df = full_df.sort_values('Date')
+    
+    return full_df
 
 
 if __name__ == "__main__":
