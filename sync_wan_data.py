@@ -237,45 +237,36 @@ def auto_wash_csv(file_path):
 
 
 def fill_missing_hours_before_run(file_path):
-    """在抓取新數據前，檢查是否有漏掉的小時，如果有則用最後一筆數據複製補齊"""
     if not os.path.exists(file_path): 
         return
-    
     try:
         df = pd.read_csv(file_path)
         if df.empty: return
         
-        # 取得 CSV 內最後的時間
         df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
         df = df.dropna(subset=['Date'])
-        df['Date'] = df['Date'].dt.floor('h')
-        df = df.drop_duplicates(subset=['Date'], keep='last').set_index('Date')
         
-        last_date = df.index.max()
-        # 取得現在的香港整點時間
-        now_hkt = datetime.now(HKT).replace(minute=0, second=0, microsecond=0)
+        # 移除時區進行比較
+        last_date = df['Date'].max().replace(tzinfo=None)
+        now_hkt = datetime.now(HKT).replace(minute=0, second=0, microsecond=0, tzinfo=None)
         
-        # 如果最後一筆紀錄比「現在的前一小時」還要早，代表有斷層
         if last_date < now_hkt - timedelta(hours=1):
-            print(f"⚠️ 發現數據斷層！最後記錄: {last_date}, 目前時間: {now_hkt}。正在複製補齊...")
+            print(f"⚠️ 發現數據斷層！最後記錄: {last_date}, 目前時間: {now_hkt}。")
             
-            # 目標補齊到目前時間的「前一個小時」（因為當前小時會由正常 run() 來抓取）
             target_end = now_hkt - timedelta(hours=1)
-            full_range = pd.date_range(start=df.index.min(), end=target_end, freq='h')
+            # 建立索引時也確保無時區
+            df = df.set_index('Date')
+            df.index = df.index.tz_localize(None) 
             
-            # 關鍵：使用 ffill() 向前填充，直接複製最後一小時的數值到空缺的小時
+            full_range = pd.date_range(start=df.index.min(), end=target_end, freq='h')
             df = df.reindex(full_range).ffill()
             
-            # 確保 AQHI 依然保持整數
             aqhi_cols = [c for c in df.columns if 'AQHI' in c]
             df[aqhi_cols] = df[aqhi_cols].clip(1, 11).round(0)
             
             df.index.name = 'Date'
             df.reset_index().to_csv(file_path, index=False, date_format='%Y-%m-%d %H:00')
-            print(f"✅ 成功將舊數據複製並補齊至 {target_end}")
-        else:
-            print("✅ 啟動檢查：時間軸連續，無須複製補齊。")
-            
+            print(f"✅ 補齊成功")
     except Exception as e:
         print(f"⚠️ 啟動檢查補齊失敗: {e}")
 
