@@ -4,6 +4,8 @@ import requests
 import xml.etree.ElementTree as ET
 import os
 import re
+import pandas as pd
+import numpy as np
 from datetime import datetime, timedelta, timezone
 
 # ====================== [配置] ======================
@@ -202,6 +204,38 @@ def save_aqhi_levels_to_firebase(risk_levels, timestamp_str):
     except Exception as e:
         print(f"⚠️ 無法同步風險等級文字: {e}")
 
+def auto_wash_csv(file_path):
+    if not os.path.exists(file_path):
+        return
+    try:
+        # 1. 讀取並修正時間格式
+        df = pd.read_csv(file_path)
+        df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+        df = df.dropna(subset=['Date'])
+        
+        # 2. 正規化為整點 (例如 16:44 -> 16:00)，並去除重複（保留最後一筆）
+        df['Date'] = df['Date'].dt.floor('h')
+        df = df.drop_duplicates(subset=['Date'], keep='last').set_index('Date')
+        
+        # 3. 補齊缺失的小時 (建立完整的時間軸)
+        full_range = pd.date_range(start=df.index.min(), end=df.index.max(), freq='h')
+        df = df.reindex(full_range)
+        
+        # 4. 智能插值 (用前後數據推算中間的缺失值，避免斷層)
+        df = df.interpolate(method='linear', limit_direction='both')
+        
+        # 5. 數值約束：AQHI 必須在 1-11 之間，且四捨五入為整數
+        aqhi_cols = [c for c in df.columns if 'AQHI' in c]
+        df[aqhi_cols] = df[aqhi_cols].clip(1, 11).round(0)
+        
+        # 6. 回寫 CSV
+        df.index.name = 'Date'
+        df.reset_index().to_csv(file_path, index=False)
+        print(f"✨ [Auto Wash] CSV 已完成清洗、補齊與整點對齊")
+    except Exception as e:
+        print(f"⚠️ Auto Wash 失敗: {e}")
+
+
 def run():
     now = datetime.now(HKT)
     timestamp_str = now.strftime("%Y-%m-%d %H:%M")
@@ -242,4 +276,5 @@ def run():
     print(f"CSV 已更新: {CSV_FILE}")
 
 if __name__ == "__main__":
-    run()
+    run()                 # 先執行抓取與同步
+    auto_wash_csv(CSV_FILE) # 抓完後立刻清洗整個 CSV
