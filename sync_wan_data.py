@@ -296,46 +296,38 @@ def run():
             elif "PDIR" in col: row.append(means["PDIR"])
             else: row.append(0.0)
 
-    # --- [功能一：追加至歷史大檔 HISTORY_FILE] ---
-    history_exists = os.path.isfile(HISTORY_FILE)
-    with open(HISTORY_FILE, "a", encoding="utf-8") as f:
+    # --- [功能一：追加至年度歷史檔案 (解決 25MB 限制)] ---
+    current_year = now.strftime("%Y")
+    annual_history_file = f"aqhi_history_{current_year}.csv"
+    
+    history_exists = os.path.isfile(annual_history_file)
+    with open(annual_history_file, "a", encoding="utf-8") as f:
         if not history_exists:
             f.write(",".join(ALL_COLUMNS) + "\n")
         f.write(",".join(map(str, row)) + "\n")
-    print(f"📦 數據已同步至歷史大檔: {HISTORY_FILE}")
+    print(f"📦 數據已同步至年度檔案: {annual_history_file}")
 
-    # --- [功能二：更新今日快取 CSV_FILE 並清理昨日數據] ---
-    # 先將當前行寫入快取
+    # --- [功能二：更新今日快取 並清理昨日數據] ---
     file_exists = os.path.isfile(CSV_FILE)
     with open(CSV_FILE, "a", encoding="utf-8") as f:
         if not file_exists:
             f.write(",".join(ALL_COLUMNS) + "\n")
         f.write(",".join(map(str, row)) + "\n")
 
-    # 執行清理邏輯：只保留今天的數據
     try:
         df_today = pd.read_csv(CSV_FILE)
         df_today['Date'] = pd.to_datetime(df_today['Date'])
-        
-        # 取得今天凌晨 00:00 的時間點
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        
-        # 過濾：只保留大於等於今天 00:00 的數據
+        # 只保留今天的資料
         df_filtered = df_today[df_today['Date'] >= today_start.replace(tzinfo=None)]
-        
-        # 寫回快取文件
         df_filtered.to_csv(CSV_FILE, index=False, date_format='%Y-%m-%d %H:00')
-        print(f"🧹 今日快取 {CSV_FILE} 已清理，目前保留今日數據共 {len(df_filtered)} 筆")
+        print(f"🧹 今日快取 {CSV_FILE} 已清理過期數據")
     except Exception as e:
-        print(f"⚠️ 清理今日快取失敗: {e}")
+        print(f"⚠️ 清理快取失敗: {e}")
 
-    # --- 原有的 Firebase 上傳 ---
+    # Firebase 同步
     upload_to_firebase(row, timestamp_str)
     save_aqhi_levels_to_firebase(risk_levels, timestamp_str)
-
-    print(f"\n--- [📊 執行完成] ---")
-    print(f"時間: {timestamp_str}")
-    print(f"數據已派發至: Firebase, {HISTORY_FILE}, {CSV_FILE}")
 
 
 if __name__ == "__main__":
