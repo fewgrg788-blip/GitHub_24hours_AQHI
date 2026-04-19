@@ -1,27 +1,70 @@
-# .github/workflows/auto_train.yml
-name: Auto Retrain GAGNN
+# .github/workflows/hourly_sync.yml
+name: ⏱️ BuildTech WAN Hourly Sync & Verify
 
 on:
   schedule:
-    - cron: '0 0 * * 0' # 每週日凌晨執行
-  workflow_dispatch:      # 允許你手動按按鈕觸發
+    - cron: "0 * * * *"  # 每小時整點執行一次
+  workflow_dispatch:      # 允許手動點擊按鈕進行 Debug
+
+permissions:
+  contents: write         # 賦予寫入權限，以便更新 CSV 歷史紀錄
 
 jobs:
-  train:
+  sync_and_predict:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with: { python-version: '3.10' }
-      - name: Install AI Libraries
-        run: pip install torch dgl pandas numpy scikit-learn # 根據你的 GNN 需求
-      - name: Run Training
-        run: python train_model.py
-      - name: Push New Model
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # 獲取完整歷史以便進行 git push
+
+      - name: 🐍 Set up Python
+        uses: uses/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: 📦 Install dependencies
+        run: |
+          pip install firebase-admin requests pandas numpy
+          echo "✅ Dependencies installed successfully."
+
+      - name: 🔑 Create Firebase Service Account Key
+        run: |
+          # 從 GitHub Secrets 讀取 JSON 內容並生成實體檔案供 Python 調用
+          cat <<EOF > serviceAccountKey.json
+          ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          EOF
+        
+      - name: 🔄 Run Sync Script
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          RENDER_GNN_API: ${{ secrets.RENDER_GNN_API }}
+        run: python sync_wan_data.py
+
+      - name: 🚀 Notify Render to Predict
+        run: |
+          # 提取最後一筆數據（排除第一欄 Date），轉為 JSON 並發送至推理引擎
+          LATEST_JSON=$(python -c "import pandas as pd; df=pd.read_csv('aqhi_history.csv'); print(df.iloc[-1, 1:].to_json())")
+          
+          echo "📡 發送最新數據至 Render..."
+          curl -X POST ${{ secrets.RENDER_GNN_API }}/predict \
+               -H "Content-Type: application/json" \
+               -d "{\"data\": $LATEST_JSON}"
+
+      - name: 💾 Commit and Push history CSV
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add gagnn_model.pth
-          git commit -m "🤖 自動更新訓練模型: $(date)" || echo "無變動"
-          git push
+          
+          if [ -f aqhi_history.csv ]; then
+            git add aqhi_history.csv
+            # 使用 [skip ci] 避免觸發重複的 workflow，並使用 || true 防止無變動時報錯
+            git commit -m "Auto-update hourly history: $(date) [skip ci]" || echo "No changes to commit"
+            git pull --rebase origin main
+            git push origin main
+            echo "✅ CSV history updated successfully."
+          else
+            echo "⚠️ aqhi_history.csv not found, skipping push."
+          fi
