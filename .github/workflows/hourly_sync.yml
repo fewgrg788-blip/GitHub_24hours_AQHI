@@ -46,13 +46,16 @@ jobs:
       - name: 🚀 Notify Render to Predict
         if: success()
         run: |
-          # 修正這裡：將 aqhi_history.csv 改為 aqhi_history_today.csv
+          # 提取最新一行數據
           LATEST_JSON=$(python -c "import pandas as pd; df=pd.read_csv('aqhi_history_today.csv'); print(df.iloc[-1, 1:].to_json())")
           
           echo "📡 發送最新數據至 Render..."
-          curl -X POST ${{ secrets.RENDER_GNN_API }}/predict \
+          # 加入 -f (fail silently) 和更準確的 URL 檢查
+          curl -f -X POST "${{ secrets.RENDER_GNN_API }}/predict" \
                -H "Content-Type: application/json" \
-               -d "{\"data\": $LATEST_JSON}"
+               -d "{\"data\": $LATEST_JSON}" \
+               --connect-timeout 30 \
+               --retry 2
 
       - name: 💾 Commit and Push changes
         if: success()
