@@ -1,68 +1,27 @@
-name: ⏱️ BuildTech WAN Hourly Sync & Verify
+# .github/workflows/auto_train.yml
+name: Auto Retrain GAGNN
 
 on:
   schedule:
-    - cron: "0 * * * *"  # 每小時整點運行
-  workflow_dispatch:      # 允許手動點擊運行進行 Debug
-
-permissions:
-  contents: write
+    - cron: '0 0 * * 0' # 每週日凌晨執行
+  workflow_dispatch:      # 允許你手動按按鈕觸發
 
 jobs:
-  sync_and_predict:
+  train:
     runs-on: ubuntu-latest
     steps:
-      - name: 📥 Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: 🐍 Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.10'
-
-      - name: 📦 Install dependencies
-        run: |
-          pip install firebase-admin requests pandas
-          echo "✅ Dependencies installed successfully."
-
-      - name: 🔑 Create Firebase Service Account Key
-        run: |
-          # 使用 cat EOF 方式可以避免 JSON 內部的特殊字元造成 echo 錯誤
-          cat <<EOF > serviceAccountKey.json
-          ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-          EOF
-        
-      - name: Run sync script
-        env:
-          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-          RENDER_GNN_API: ${{ secrets.RENDER_GNN_API }}
-        run: python sync_wan_data.py
-
-      - name: 🚀 Notify Render to Predict
-        run: |
-          # 從清洗後的 CSV 提取最後一筆數據並轉為 JSON 格式
-          # 我們過濾掉 Date 欄位，只傳送數值給模型
-          LATEST_JSON=$(python -c "import pandas as pd; df=pd.read_csv('aqhi_history.csv'); print(df.iloc[-1, 1:].to_json())")
-          
-          echo "📡 發送最新數據至 Render 推理引擎..."
-          curl -X POST https://your-render-app-name.onrender.com/predict \
-               -H "Content-Type: application/json" \
-               -d "{\"data\": $LATEST_JSON}"
-
-      - name: 💾 Commit and Push history CSV
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with: { python-version: '3.10' }
+      - name: Install AI Libraries
+        run: pip install torch dgl pandas numpy scikit-learn # 根據你的 GNN 需求
+      - name: Run Training
+        run: python train_model.py
+      - name: Push New Model
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          
-          if [ -f aqhi_history.csv ]; then
-            git add aqhi_history.csv
-            # 使用 git commit || true 避免在沒有資料更新時導致 workflow 報錯失敗
-            git commit -m "Auto-update hourly history: $(date)" || echo "No changes to commit"
-            git pull --rebase origin main
-            git push origin main
-            echo "✅ CSV history pushed to GitHub."
-          else
-            echo "⚠️ CSV file not found, skipping push."
-          fi
+          git add gagnn_model.pth
+          git commit -m "🤖 自動更新訓練模型: $(date)" || echo "無變動"
+          git push
