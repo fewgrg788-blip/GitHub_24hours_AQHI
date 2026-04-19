@@ -91,19 +91,16 @@ def fetch_data():
                 # 1. 建立安全名稱（把 Central/Western 變成 Central_Western）
                 safe_name = pure_name.replace("/", "_")
                 
-                # 2. 儲存到 risk_levels 使用安全名稱，這樣 Firebase 才不會報錯
+                # 2. 儲存到 risk_levels 使用安全名稱，避開 Firebase 限制
                 risk_levels[safe_name] = level_text
                 
                 key = f"AQHI_{pure_name}"
                 if key in ALL_COLUMNS:
                     fetched[key] = val
-                    # ❌ 注意：這裡不要再寫一次 risk_levels[pure_name] = level_text
-                    # 因為 pure_name 含有斜線，會覆蓋掉上面的 safe_name 並導致上傳失敗
-                    
                     vals["aqhi"].append(val)
                     print(f"✅ [AQHI] {pure_name}: {val} ({level_text})")
-            except Exception as e:
-                print(f"❌ AQHI 錯誤: {e}")
+    except Exception as e:
+        print(f"❌ AQHI 錯誤: {e}")
 
     # 2. Wind CSV（精準匹配）
     try:
