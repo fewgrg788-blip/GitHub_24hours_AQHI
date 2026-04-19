@@ -3,15 +3,17 @@ name: ⏱️ BuildTech WAN Hourly Sync & Verify
 
 on:
   schedule:
-    - cron: "0 * * * *"  # 每小時整點執行
-  workflow_dispatch:      # 允許手動點擊按鈕進行 Debug
+    - cron: "0 * * * *"
+  workflow_dispatch:
 
 permissions:
-  contents: write         # 賦予寫入權限，以便更新 CSV
+  contents: write
 
 jobs:
   sync_and_predict:
     runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true # 解決 Node.js 20 棄用警告
 
     steps:
       - name: 📥 Checkout repository
@@ -20,7 +22,7 @@ jobs:
           fetch-depth: 0
 
       - name: 🐍 Set up Python
-        uses: actions/setup-python@v5  # 正確路徑
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
           cache: 'pip'
@@ -28,10 +30,14 @@ jobs:
       - name: 📦 Install dependencies
         run: |
           pip install firebase-admin requests pandas numpy
-          echo "✅ Dependencies installed successfully."
+          echo "✅ Dependencies installed."
 
       - name: 🔑 Create Firebase Service Account Key
         run: |
+          if [ -z "${{ secrets.FIREBASE_SERVICE_ACCOUNT }}" ]; then
+            echo "❌ Error: FIREBASE_SERVICE_ACCOUNT secret is empty!"
+            exit 1
+          fi
           cat <<EOF > serviceAccountKey.json
           ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           EOF
@@ -40,28 +46,25 @@ jobs:
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           RENDER_GNN_API: ${{ secrets.RENDER_GNN_API }}
-        run: python sync_wan_data.py
+        run: |
+          # 執行並捕獲錯誤輸出
+          python sync_wan_data.py || { echo "❌ Sync script failed!"; exit 1; }
 
       - name: 🚀 Notify Render to Predict
+        if: success() # 只有同步成功才執行預測
         run: |
-          # 提取最後一筆數據並發送至 Render
           LATEST_JSON=$(python -c "import pandas as pd; df=pd.read_csv('aqhi_history.csv'); print(df.iloc[-1, 1:].to_json())")
-          echo "📡 發送最新數據至 Render..."
+          echo "📡 Sending data to Render..."
           curl -X POST ${{ secrets.RENDER_GNN_API }}/predict \
                -H "Content-Type: application/json" \
                -d "{\"data\": $LATEST_JSON}"
 
-      - name: 💾 Commit and Push history CSV
+      - name: 💾 Commit and Push changes
+        if: success()
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          
-          if [ -f aqhi_history.csv ]; then
-            git add aqhi_history.csv
-            git commit -m "Auto-update hourly history: $(date) [skip ci]" || echo "No changes to commit"
-            git pull --rebase origin main
-            git push origin main
-            echo "✅ CSV history updated."
-          else
-            echo "⚠️ aqhi_history.csv not found."
-          fi
+          git add aqhi_history.csv
+          git commit -m "Auto-update: $(date) [skip ci]" || echo "No changes to commit"
+          git pull --rebase origin main
+          git push origin main
