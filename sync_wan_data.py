@@ -331,11 +331,14 @@ def run():
 
 
 if __name__ == "__main__":
-    # 1. 啟動時補齊數據（針對歷史大檔）
-    fill_missing_hours_before_run(HISTORY_FILE)
+    current_year = datetime.now(HKT).strftime("%Y")
+    target_annual_file = f"aqhi_history_{current_year}.csv"
+
+    # 1. 補齊當年數據斷層
+    fill_missing_hours_before_run(target_annual_file)
     
-    # 2. 執行同步（內部會處理兩個 CSV 和 Firebase）
+    # 2. 執行抓取與分發
     run()
     
-    # 3. 定期清洗歷史大檔，確保沒有重複或亂碼
-    auto_wash_csv(HISTORY_FILE)
+    # 3. 清洗當年檔案
+    auto_wash_csv(target_annual_file)
