@@ -2,32 +2,46 @@ name: GAGNN Auto Retrain
 
 on:
   schedule:
-    - cron: '0 0 * * 0' # 每週日凌晨自動訓練
-  workflow_dispatch:      # 允許手動觸發
+    - cron: '0 0 * * 0' # 每週日凌晨 08:00 (HKT) 自動訓練
+  workflow_dispatch:      # 允許手動觸發測試
 
 jobs:
-  build:
+  train:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      
-      - name: Set up Python
+      - name: 📂 Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 🐍 Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-          
-      - name: Install dependencies
+          cache: 'pip' # 開啟快取，下次執行會快很多
+
+      - name: 📦 Install ML Dependencies
         run: |
-          pip install torch torch-geometric pandas numpy scikit-learn
-          # 注意：GitHub Runner 沒有 GPU，所以會自動安裝 CPU 版 torch
-          
-      - name: Train Model
-        run: python train_model.py
-        
-      - name: Commit and Push
+          # 優先安裝 CPU 版 Torch 以節省空間與時間
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install torch-geometric pandas numpy scikit-learn
+
+      - name: 🧠 Train GAGNN Model
+        run: |
+          echo "🚀 開始每週訓練進化..."
+          python train_model.py
+          echo "✅ 訓練完成！"
+
+      - name: 💾 Commit and Push Weights
+        if: success()
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
+          
+          # 確保追蹤模型權重檔案
           git add hk_pro_model_best.pth
-          git commit -m "🤖 自動更新模型權重: $(date)" || echo "無變動"
+          
+          # 提交更新，如果權重沒變則跳過
+          git commit -m "🤖 自動更新模型權重: $(date) [skip ci]" || echo "無變動"
+          
+          # 關鍵：先拉取最新數據更新防止衝突，再推送
+          git pull --rebase origin main
           git push
