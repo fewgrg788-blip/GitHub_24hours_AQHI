@@ -1,38 +1,11 @@
-name: 📊 Daily Model Data Upgrade
+import glob
+import pandas as pd
 
-on:
-  schedule:
-    # 注意时区：GitHub Action 服务器默认使用 UTC 时间。
-    # 香港时间 (HKT) 是 UTC+8。
-    # 每天 HKT 23:50 运行 = UTC 15:50
-    - cron: "50 15 * * *" 
-  workflow_dispatch:
-
-permissions:
-  contents: write
-
-jobs:
-  daily-upgrade:
-    runs-on: ubuntu-latest
-    steps:
-      - name: 📥 Checkout repository
-        uses: actions/checkout@v4
-
-      - name: 🐍 Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.9'
-
-      - name: 📦 Install dependencies
-        run: pip install requests pandas
-
-      - name: 🚀 Run Daily Feature Extraction
-        run: python sync_full_data.py
-        
-      - name: 💾 Commit and Push Master Dataset
-        run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          git add GAGNN_Ready_Data_2013_2025.csv
-          git commit -m "Auto-append daily training features: $(date)" || echo "No changes to commit"
-          git push
+def load_all_history():
+    # 抓取所有符合 aqhi_history_20xx.csv 格式的檔案
+    files = sorted(glob.glob("aqhi_history_20*.csv"))
+    df_list = [pd.read_csv(f) for f in files]
+    
+    # 合併成一個大型 DataFrame 供 GAGNN 訓練
+    full_df = pd.concat(df_list, ignore_index=True)
+    return full_df
