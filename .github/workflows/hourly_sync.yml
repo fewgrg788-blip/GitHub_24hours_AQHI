@@ -34,21 +34,14 @@ jobs:
 
       - name: 🔑 Create Firebase Service Account Key
         run: |
-          if [ -z "${{ secrets.FIREBASE_SERVICE_ACCOUNT }}" ]; then
-            echo "❌ Error: FIREBASE_SERVICE_ACCOUNT secret is empty!"
-            exit 1
-          fi
-          cat <<EOF > serviceAccountKey.json
-          ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-          EOF
+          # 從 Secrets 讀取並生成 JSON 檔案
+          echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' > serviceAccountKey.json
         
       - name: 🔄 Run Sync Script
         env:
-          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          # 確保 Python 能讀取到 API 地址
           RENDER_GNN_API: ${{ secrets.RENDER_GNN_API }}
-        run: |
-          # 執行並捕獲錯誤輸出
-          python sync_wan_data.py || { echo "❌ Sync script failed!"; exit 1; }
+        run: python sync_wan_data.py
 
       - name: 🚀 Notify Render to Predict
         if: success() # 只有同步成功才執行預測
