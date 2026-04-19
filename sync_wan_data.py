@@ -9,10 +9,12 @@ import numpy as np
 from datetime import datetime, timedelta, timezone
 
 # ====================== [配置] ======================
+CSV_FILE = "aqhi_history.csv"        # 這是「今日快取」，只存今天
+HISTORY_FILE = "aqhi_history_final.csv"  # 這是「歷史大檔」，供訓練使用
+
 FIREBASE_URL = "https://project-12cc8-default-rtdb.asia-southeast1.firebasedatabase.app/"
 SERVICE_ACCOUNT_PATH = "serviceAccountKey.json"   # 沒有就忽略 Firebase 錯誤
 
-CSV_FILE = "aqhi_history.csv"
 HKT = timezone(timedelta(hours=8))
 
 AQHI_URL = "https://www.aqhi.gov.hk/epd/ddata/html/out/aqhi_ind_rss_Eng.xml"
@@ -279,17 +281,14 @@ def fill_missing_hours_before_run(file_path):
 def run():
     now = datetime.now(HKT)
     timestamp_str = now.strftime("%Y-%m-%d %H:00")
-    fetched, means, risk_levels = fetch_data() # ⬅️ 接收 risk_levels
+    fetched, means, risk_levels = fetch_data()
     
     row = [timestamp_str]
-    matched = 0
-    
     for col in ALL_COLUMNS[1:]:
         if col == "Cyclone_Present":
             row.append(0)
         elif col in fetched:
             row.append(fetched[col])
-            matched += 1
         else:
             if "AQHI" in col: row.append(round(means["AQHI"]))
             elif "HUM" in col: row.append(round(means["HUM"], 1))
@@ -297,30 +296,54 @@ def run():
             elif "PDIR" in col: row.append(means["PDIR"])
             else: row.append(0.0)
 
-    # 寫入 CSV
+    # --- [功能一：追加至歷史大檔 HISTORY_FILE] ---
+    history_exists = os.path.isfile(HISTORY_FILE)
+    with open(HISTORY_FILE, "a", encoding="utf-8") as f:
+        if not history_exists:
+            f.write(",".join(ALL_COLUMNS) + "\n")
+        f.write(",".join(map(str, row)) + "\n")
+    print(f"📦 數據已同步至歷史大檔: {HISTORY_FILE}")
+
+    # --- [功能二：更新今日快取 CSV_FILE 並清理昨日數據] ---
+    # 先將當前行寫入快取
     file_exists = os.path.isfile(CSV_FILE)
     with open(CSV_FILE, "a", encoding="utf-8") as f:
         if not file_exists:
             f.write(",".join(ALL_COLUMNS) + "\n")
         f.write(",".join(map(str, row)) + "\n")
-    
-    # 執行上傳歷史數據 (GNN 模型用的數字陣列)
+
+    # 執行清理邏輯：只保留今天的數據
+    try:
+        df_today = pd.read_csv(CSV_FILE)
+        df_today['Date'] = pd.to_datetime(df_today['Date'])
+        
+        # 取得今天凌晨 00:00 的時間點
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        
+        # 過濾：只保留大於等於今天 00:00 的數據
+        df_filtered = df_today[df_today['Date'] >= today_start.replace(tzinfo=None)]
+        
+        # 寫回快取文件
+        df_filtered.to_csv(CSV_FILE, index=False, date_format='%Y-%m-%d %H:00')
+        print(f"🧹 今日快取 {CSV_FILE} 已清理，目前保留今日數據共 {len(df_filtered)} 筆")
+    except Exception as e:
+        print(f"⚠️ 清理今日快取失敗: {e}")
+
+    # --- 原有的 Firebase 上傳 ---
     upload_to_firebase(row, timestamp_str)
-    
-    # 執行上傳即時等級 (App 儀表板用的文字狀態)
     save_aqhi_levels_to_firebase(risk_levels, timestamp_str)
 
     print(f"\n--- [📊 執行完成] ---")
     print(f"時間: {timestamp_str}")
-    print(f"匹配成功: {matched} / {len(ALL_COLUMNS)-1} 欄位")
-    print(f"CSV 已更新: {CSV_FILE}")
+    print(f"數據已派發至: Firebase, {HISTORY_FILE}, {CSV_FILE}")
+
 
 if __name__ == "__main__":
-    # 1. 啟動時先檢查：如果停機了幾小時，先把缺失的格子用舊數據填滿
-    fill_missing_hours_before_run(CSV_FILE)
+    # 1. 啟動時補齊數據（針對歷史大檔）
+    fill_missing_hours_before_run(HISTORY_FILE)
     
-    # 2. 正常執行：抓取當前這個小時的最新數據
+    # 2. 執行同步（內部會處理兩個 CSV 和 Firebase）
     run()
     
-    # 3. 結束時清洗：進行最後的平滑化與對齊，確保輸出完美
-    auto_wash_csv(CSV_FILE)
+    # 3. 定期清洗歷史大檔，確保沒有重複或亂碼
+    auto_wash_csv(HISTORY_FILE)
