@@ -36,12 +36,6 @@ jobs:
         run: |
           # 從 Secrets 讀取並生成 JSON 檔案
           echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' > serviceAccountKey.json
-        
-      - name: 🔄 Trigger Render Redeploy
-        if: success()
-        run: |
-          echo "正在通知 Render 重新部署以抓取最新數據..."
-          curl -X GET "https://api.render.com/deploy/srv-d6tsqu450q8c73fm60gg?key=nN7xBUdAQa0"
 
       - name: 🚀 Notify Render to Sync
         if: success()
@@ -71,3 +65,10 @@ jobs:
           git commit -m "🤖 自動更新數據: $(date) [skip ci]" || echo "無變動"
           git pull --rebase origin main
           git push origin main
+
+
+      - name: 🔄 Trigger Render Redeploy
+        if: success()
+        run: |
+          echo "正在通知 Render 重新部署以抓取最新數據..."
+          curl -X GET "https://api.render.com/deploy/srv-d6tsqu450q8c73fm60gg?key=nN7xBUdAQa0"
