@@ -61,22 +61,20 @@ jobs:
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           
-          # 1. 先把腳本產生的新數據加到暫存區
-          git add .
+          # 1. 核心修正：手動刪除金鑰檔案，確保它絕對不會被加進 Git
+          rm -f serviceAccountKey.json
           
-          # 2. 檢查是否有東西需要提交
+          # 2. 只加入 CSV 數據檔案與 data 資料夾
+          git add aqhi_history_today.csv data/
+          
+          # 3. 檢查是否有變動
           if git diff --staged --quiet; then
             echo "ℹ️ No changes to commit"
           else
-            # 3. 提交變更
             git commit -m "🤖 自動更新數據: $(date) [skip ci]"
-            
-            # 4. 這時候再 pull --rebase。即使遠端有變動，Git 也會把你的 commit 接在後面
             git pull origin main --rebase
-            
-            # 5. 推送到遠端
             git push origin main
-            echo "✅ Changes successfully pushed to GitHub."
+            echo "✅ CSV changes pushed to GitHub (Secret excluded)."
           fi
 
       - name: 🔄 Trigger Render Redeploy
