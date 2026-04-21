@@ -1,4 +1,4 @@
-# --- 基礎 API 服務 (從預設 PyPi 下載) ---
+# --- 先安裝標準庫 (從預設 PyPi 抓取) ---
 flask
 gunicorn
 pandas
@@ -8,7 +8,7 @@ scikit-learn
 requests
 firebase-admin
 
-# --- 深度學習模型 (指定從 PyTorch CPU 鏡像下載) ---
+# --- 最後安裝深度學習庫 (指定從 PyTorch CPU 鏡像抓取) ---
 --extra-index-url https://download.pytorch.org/whl/cpu
 torch
 torch-geometric
