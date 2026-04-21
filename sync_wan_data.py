@@ -356,9 +356,16 @@ def get_full_history_dataframe():
     full_df = full_df.sort_values('Date')
     return full_df
 
+# 建議將這段確保目錄存在的代碼封裝，或確保它在 run() 之前被調用
+def ensure_directories():
+    if not os.path.exists(DATA_DIR):
+        os.makedirs(DATA_DIR, exist_ok=True)
+        print(f"📁 已確保數據資料夾存在: {DATA_DIR}")
+
 if __name__ == "__main__":
+    ensure_directories() # 強制檢查
+    
     current_year = datetime.now(HKT).strftime("%Y")
-    # 修改處：目標檔案路徑包含 data/
     target_annual_file = os.path.join(DATA_DIR, f"aqhi_history_{current_year}.csv")
 
     # 1. 補齊數據斷層
