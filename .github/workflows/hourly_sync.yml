@@ -41,6 +41,23 @@ jobs:
           python sync_wan_data.py
           echo "✅ [Log] Script execution finished."
 
+
+      - name: Update Data
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          
+          # 關鍵步驟：先嘗試 pull，如果失敗則暫存修改
+          git pull origin main || (git stash && git pull origin main --rebase && git stash pop)
+          
+          # 執行你的 Python 腳本
+          python your_script_name.py
+          
+          # 提交並推回 GitHub
+          git add .
+          git commit -m "🤖 自動更新數據: $(date) [skip ci]" || echo "No changes to commit"
+          git push origin main
+
       - name: 🚀 Notify Render to Sync (Instant Update)
         if: success()
         run: |
