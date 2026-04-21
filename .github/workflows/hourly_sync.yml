@@ -61,16 +61,22 @@ jobs:
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           
-          # 關鍵：先同步遠端變更，防止衝突
-          git pull origin main --rebase
-          
+          # 1. 先把腳本產生的新數據加到暫存區
           git add .
+          
+          # 2. 檢查是否有東西需要提交
           if git diff --staged --quiet; then
             echo "ℹ️ No changes to commit"
           else
+            # 3. 提交變更
             git commit -m "🤖 自動更新數據: $(date) [skip ci]"
+            
+            # 4. 這時候再 pull --rebase。即使遠端有變動，Git 也會把你的 commit 接在後面
+            git pull origin main --rebase
+            
+            # 5. 推送到遠端
             git push origin main
-            echo "✅ Changes pushed to GitHub."
+            echo "✅ Changes successfully pushed to GitHub."
           fi
 
       - name: 🔄 Trigger Render Redeploy
