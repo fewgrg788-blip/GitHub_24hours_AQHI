@@ -9,8 +9,14 @@ import numpy as np
 import glob
 from datetime import datetime, timedelta, timezone
 
-# ====================== [配置] ======================
-CSV_FILE = "aqhi_history_today.csv"  # 改名為 today 以免跟舊檔案混淆
+# ====================== [配置] =====================
+DATA_DIR = "data"
+if not os.path.exists(DATA_DIR):
+    os.makedirs(DATA_DIR)
+    print(f"📁 已建立數據資料夾: {DATA_DIR}")
+
+CSV_FILE = "aqhi_history_today.csv"  # 這是今日快取，維持在根目錄
+# 年度歷史檔案現在會變成: data/aqhi_history_2026.csv
 
 FIREBASE_URL = "https://project-12cc8-default-rtdb.asia-southeast1.firebasedatabase.app/"
 SERVICE_ACCOUNT_PATH = "serviceAccountKey.json"   # 沒有就忽略 Firebase 錯誤
@@ -296,9 +302,10 @@ def run():
             elif "PDIR" in col: row.append(means["PDIR"])
             else: row.append(0.0)
 
-    # --- [功能一：追加至年度歷史檔案 (解決 25MB 限制)] ---
+    # --- [功能一：追加至年度歷史檔案 (已更改路徑至 data/)] ---
     current_year = now.strftime("%Y")
-    annual_history_file = f"aqhi_history_{current_year}.csv"
+    # 修改處：路徑加入 DATA_DIR
+    annual_history_file = os.path.join(DATA_DIR, f"aqhi_history_{current_year}.csv")
     
     history_exists = os.path.isfile(annual_history_file)
     with open(annual_history_file, "a", encoding="utf-8") as f:
@@ -318,10 +325,9 @@ def run():
         df_today = pd.read_csv(CSV_FILE)
         df_today['Date'] = pd.to_datetime(df_today['Date'])
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        # 只保留今天的資料
         df_filtered = df_today[df_today['Date'] >= today_start.replace(tzinfo=None)]
         df_filtered.to_csv(CSV_FILE, index=False, date_format='%Y-%m-%d %H:00')
-        print(f"🧹 今日快取 {CSV_FILE} 已清理過期數據")
+        print(f"掃 今日快取 {CSV_FILE} 已清理過期數據")
     except Exception as e:
         print(f"⚠️ 清理快取失敗: {e}")
 
@@ -329,12 +335,13 @@ def run():
     upload_to_firebase(row, timestamp_str)
     save_aqhi_levels_to_firebase(risk_levels, timestamp_str)
 
-
 def get_full_history_dataframe():
     """
-    自動抓取目錄下所有的 aqhi_history_20*.csv 並合併成一個 DataFrame
+    自動抓取 data/ 目錄下所有的 aqhi_history_20*.csv 並合併
     """
-    all_files = sorted(glob.glob("aqhi_history_20*.csv"))
+    # 修改處：在 data 目錄下搜尋
+    search_path = os.path.join(DATA_DIR, "aqhi_history_20*.csv")
+    all_files = sorted(glob.glob(search_path))
     print(f"📚 正在讀取並合併以下年度檔案: {all_files}")
     
     df_list = []
@@ -342,23 +349,23 @@ def get_full_history_dataframe():
         df_temp = pd.read_csv(filename)
         df_list.append(df_temp)
     
+    if not df_list: return pd.DataFrame()
+    
     full_df = pd.concat(df_list, ignore_index=True)
-    # 確保日期排序正確
     full_df['Date'] = pd.to_datetime(full_df['Date'])
     full_df = full_df.sort_values('Date')
-    
     return full_df
-
 
 if __name__ == "__main__":
     current_year = datetime.now(HKT).strftime("%Y")
-    target_annual_file = f"aqhi_history_{current_year}.csv"
+    # 修改處：目標檔案路徑包含 data/
+    target_annual_file = os.path.join(DATA_DIR, f"aqhi_history_{current_year}.csv")
 
-    # 1. 補齊當年數據斷層
+    # 1. 補齊數據斷層
     fill_missing_hours_before_run(target_annual_file)
     
-    # 2. 執行抓取與分發
+    # 2. 執行抓取
     run()
     
-    # 3. 清洗當年檔案
+    # 3. 清洗檔案
     auto_wash_csv(target_annual_file)
