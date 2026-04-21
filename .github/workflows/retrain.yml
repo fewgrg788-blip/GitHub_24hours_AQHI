@@ -1,9 +1,12 @@
-name: GAGNN Auto Retrain
+name: 🧠 GAGNN Auto Retrain
 
 on:
   schedule:
-    - cron: '0 0 * * 0' # 每週日凌晨 08:00 (HKT) 自動訓練
+    - cron: '0 0 * * 0' # 每週日凌晨 08:00 (HKT) 執行
   workflow_dispatch:      # 允許手動觸發測試
+
+permissions:
+  contents: write
 
 jobs:
   train:
@@ -11,37 +14,57 @@ jobs:
     steps:
       - name: 📂 Checkout Repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # 確保獲取完整歷史以進行 rebase
 
       - name: 🐍 Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-          cache: 'pip' # 開啟快取，下次執行會快很多
+          cache: 'pip'
 
+      # 🌟 修正 1: PyG 需要特定的安裝順序，否則會找不到 torch 模組
       - name: 📦 Install ML Dependencies
         run: |
-          # 優先安裝 CPU 版 Torch 以節省空間與時間
           pip install torch --index-url https://download.pytorch.org/whl/cpu
-          pip install torch-geometric pandas numpy scikit-learn
+          # 安裝 PyG 的必要組件 (CPU 版)
+          pip install torch-scatter torch-sparse torch-cluster torch-spline-conv -f https://data.pyg.org/whl/torch-2.0.0+cpu.html
+          pip install torch-geometric pandas numpy scikit-learn firebase-admin
+          echo "✅ [Log] ML Dependencies installed."
+
+      # 🌟 修正 2: 如果你的訓練腳本需要記錄 Loss 到 Firebase，這步不能省
+      - name: 🔑 Create Firebase Service Account Key
+        run: |
+          echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' > serviceAccountKey.json
+          echo "✅ [Log] Firebase Key file created for training logs."
 
       - name: 🧠 Train GAGNN Model
         run: |
-          echo "🚀 開始每週訓練進化..."
+          echo "🚀 [Log] Starting weekly evolution..."
+          # 建議在訓練腳本加入檢查：如果數據量太少則跳過訓練
           python train_model.py
-          echo "✅ 訓練完成！"
+          echo "✅ [Log] Training completed!"
 
       - name: 💾 Commit and Push Weights
         if: success()
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
+          
+          # 同時追蹤模型權重、標準化參數與生成的預測 CSV
           git add hk_pro_model_best.pth scaler_aqhi.pkl scaler_weather.pkl gagnn_prediction_*.csv
-          git commit -m "🤖 自動更新模型與預測數據: $(date) [skip ci]" || echo "無變動"
-          git pull --rebase origin main
-          git push
+          
+          if git diff --staged --quiet; then
+            echo "ℹ️ [Log] No model updates detected."
+          else
+            git commit -m "🤖 [AI Evolution] Auto-updated weights & scalars: $(date) [skip ci]"
+            git pull --rebase origin main
+            git push origin main
+            echo "✅ [Log] New weights pushed to repository."
+          fi
 
       - name: 🔔 Trigger Render Deploy
         if: success()
         run: |
-          echo "🚀 正在通知 Render 重新部署最新模型..."
+          echo "🚀 [Log] Notifying Render to pull the latest evolved model..."
           curl -X GET "https://api.render.com/deploy/srv-d6tsqu450q8c73fm60gg?key=nN7xBUdAQa0"
