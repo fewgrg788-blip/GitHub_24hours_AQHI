@@ -1,0 +1,14 @@
+# Firebase 敏感金鑰 (絕對不能上傳！)
+serviceAccountKey.json
+
+# Python 暫存檔
+__pycache__/
+*.py[cod]
+
+# 環境變數與虛擬環境
+.env
+venv/
+.venv/
+
+# 大型數據或日誌（視需求而定）
+*.log
