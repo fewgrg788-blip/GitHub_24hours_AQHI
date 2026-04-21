@@ -1,19 +1,18 @@
-# 数据处理 (Data Processing)
+# --- API 與網頁服務 (Render 端) ---
+flask
+gunicorn
+
+# --- 數據處理與模型加載 ---
 pandas
 numpy
+joblib
 scikit-learn
 
-# 网页抓取 (Web Scraping)
+# --- 數據採集 (GitHub Action 端) ---
 requests
-beautifulsoup4
-
-# 数据库通信 (Firebase)
 firebase-admin
 
-# 深度学习推理 (Deep Learning - 用于 Render)
+# --- 深度學習推理 (關鍵：使用 CPU 版本以節省記憶體) ---
+--index-url https://download.pytorch.org/whl/cpu
 torch
 torch-geometric
-
-# API 服务 (Web Service - 用于 Render)
-fastapi
-uvicorn
