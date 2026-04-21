@@ -35,13 +35,13 @@ jobs:
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          
-          # 確保追蹤模型權重檔案
-          git add hk_pro_model_best.pth
-          
-          # 提交更新，如果權重沒變則跳過
-          git commit -m "🤖 自動更新模型權重: $(date) [skip ci]" || echo "無變動"
-          
-          # 關鍵：先拉取最新數據更新防止衝突，再推送
+          git add hk_pro_model_best.pth scaler_aqhi.pkl scaler_weather.pkl gagnn_prediction_*.csv
+          git commit -m "🤖 自動更新模型與預測數據: $(date) [skip ci]" || echo "無變動"
           git pull --rebase origin main
           git push
+
+      - name: 🔔 Trigger Render Deploy
+        if: success()
+        run: |
+          echo "🚀 正在通知 Render 重新部署最新模型..."
+          curl -X GET "https://api.render.com/deploy/srv-d6tsqu450q8c73fm60gg?key=nN7xBUdAQa0"
