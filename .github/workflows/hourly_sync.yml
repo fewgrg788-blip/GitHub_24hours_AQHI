@@ -58,12 +58,8 @@ jobs:
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          
-          # 同時追蹤這兩個檔案
           git add aqhi_history_today.csv aqhi_history_2026.csv
-          
-          git commit -m "🤖 自動更新數據: $(date) [skip ci]" || echo "無變動"
-          git pull --rebase origin main
+          git commit -m "🤖 更新數據: $(date)" || echo "無變動"
           git push origin main
 
 
