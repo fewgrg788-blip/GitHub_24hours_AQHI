@@ -46,12 +46,13 @@ jobs:
       - name: 🚀 Notify Render to Sync
         if: success()
         run: |
-          # 1. 提取最新一行數據 (移除 1:，確保包含 Date 欄位)
+          # 1. 提取最新一行數據並轉換為 JSON
           LATEST_JSON=$(python -c "import pandas as pd; df=pd.read_csv('aqhi_history_today.csv'); print(df.iloc[-1].to_json())")
           
           echo "📡 發送最新數據至 Render..."
           
-          # 2. 將 URL 從 /predict 修正為 /sync，並直接傳送 JSON
+          # 2. 修正 URL 與路徑
+          # 確保變數後面有加上 /sync
           curl -f -X POST "${{ secrets.RENDER_GNN_API }}/sync" \
                -H "Content-Type: application/json" \
                -d "$LATEST_JSON" \
