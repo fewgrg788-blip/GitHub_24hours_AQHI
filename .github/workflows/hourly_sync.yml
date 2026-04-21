@@ -30,74 +30,50 @@ jobs:
 
       - name: 🔑 Create Firebase Service Account Key
         run: |
-          # 從 Secrets 讀取並生成 JSON 檔案
           echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' > serviceAccountKey.json
           echo "✅ [Log] Firebase Key file created."
 
-      # 🌟 重要：這一步才是真正執行你的 Python 腳本，更新 CSV 與 Firebase
       - name: 🚀 Run Data Collection Script
         run: |
           echo "🎬 [Log] Starting sync_wan_data.py..."
+          # 這裡使用正確的檔名
           python sync_wan_data.py
           echo "✅ [Log] Script execution finished."
-
-
-      - name: Update Data
-        run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          
-          # 關鍵步驟：先嘗試 pull，如果失敗則暫存修改
-          git pull origin main || (git stash && git pull origin main --rebase && git stash pop)
-          
-          # 執行你的 Python 腳本
-          python your_script_name.py
-          
-          # 提交並推回 GitHub
-          git add .
-          git commit -m "🤖 自動更新數據: $(date) [skip ci]" || echo "No changes to commit"
-          git push origin main
 
       - name: 🚀 Notify Render to Sync (Instant Update)
         if: success()
         run: |
           echo "🔍 [Log] Extracting latest row from CSV..."
-          # 檢查檔案是否存在
           if [ ! -f "aqhi_history_today.csv" ]; then
             echo "❌ [Error] aqhi_history_today.csv not found!"
             exit 1
           fi
-          
           LATEST_JSON=$(python -c "import pandas as pd; df=pd.read_csv('aqhi_history_today.csv'); print(df.iloc[-1].to_json())")
-          echo "📡 [Log] Sending data to Render: $LATEST_JSON"
-          
           curl -f -X POST "${{ secrets.RENDER_GNN_API }}/sync" \
                -H "Content-Type: application/json" \
                -d "$LATEST_JSON" \
                --connect-timeout 30 \
                --retry 2
-          echo "✅ [Log] Render notification sent."
 
-      - name: 💾 Commit and Push changes (Permanent Storage)
+      - name: 💾 Commit and Push changes
         if: success()
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           
-          # 檢查是否有檔案變動
-          git add aqhi_history_today.csv aqhi_history_2026.csv
+          # 關鍵：先同步遠端變更，防止衝突
+          git pull origin main --rebase
+          
+          git add .
           if git diff --staged --quiet; then
-            echo "ℹ️ [Log] No changes in CSV files, skipping commit."
+            echo "ℹ️ No changes to commit"
           else
             git commit -m "🤖 自動更新數據: $(date) [skip ci]"
-            git pull --rebase origin main
             git push origin main
-            echo "✅ [Log] CSV changes pushed to GitHub."
+            echo "✅ Changes pushed to GitHub."
           fi
 
       - name: 🔄 Trigger Render Redeploy
         if: success()
         run: |
-          echo "🔄 [Log] Triggering Render redeploy to refresh file cache..."
           curl -X GET "https://api.render.com/deploy/srv-d6tsqu450q8c73fm60gg?key=nN7xBUdAQa0"
-          echo "✅ [Log] Render redeploy triggered."
