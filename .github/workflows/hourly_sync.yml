@@ -43,17 +43,18 @@ jobs:
           RENDER_GNN_API: ${{ secrets.RENDER_GNN_API }}
         run: python sync_wan_data.py
 
-      - name: 🚀 Notify Render to Predict
+      - name: 🚀 Notify Render to Sync
         if: success()
         run: |
-          # 提取最新一行數據
-          LATEST_JSON=$(python -c "import pandas as pd; df=pd.read_csv('aqhi_history_today.csv'); print(df.iloc[-1, 1:].to_json())")
+          # 1. 提取最新一行數據 (移除 1:，確保包含 Date 欄位)
+          LATEST_JSON=$(python -c "import pandas as pd; df=pd.read_csv('aqhi_history_today.csv'); print(df.iloc[-1].to_json())")
           
           echo "📡 發送最新數據至 Render..."
-          # 加入 -f (fail silently) 和更準確的 URL 檢查
-          curl -f -X POST "${{ secrets.RENDER_GNN_API }}/predict" \
+          
+          # 2. 將 URL 從 /predict 修正為 /sync，並直接傳送 JSON
+          curl -f -X POST "${{ secrets.RENDER_GNN_API }}/sync" \
                -H "Content-Type: application/json" \
-               -d "{\"data\": $LATEST_JSON}" \
+               -d "$LATEST_JSON" \
                --connect-timeout 30 \
                --retry 2
 
