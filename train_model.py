@@ -1332,6 +1332,10 @@ def start_scheduler():
 # MAIN EXECUTOR (v2.0 Aligned)
 # ══════════════════════════════════════════════════════════════════════════════
 
+# ══════════════════════════════════════════════════════════════════════════════
+# MAIN EXECUTOR (v2.0 Fixed)
+# ══════════════════════════════════════════════════════════════════════════════
+
 def parse_args():
     p = argparse.ArgumentParser(description="GAGNN v2.0 Training Script")
     p.add_argument("--csv",        type=str, default="./data/", help="Path to CSV data directory")
@@ -1346,28 +1350,36 @@ def parse_args():
     return p.parse_args()
 
 def train_all_horizons(args):
-    """迴圈執行 3h, 6h, 24h 的訓練"""
+    """主循環：依序訓練 3h, 6h, 24h"""
     for h in args.horizons:
-        print("\n" + "="*50)
+        print("\n" + "="*60)
         print(f"🚩 STARTING TRAINING FOR HORIZON: {h}h")
-        print("="*50)
-        # 對齊你檔案中的函數名稱: main_train_flow
-        main_train_flow(h, args) 
+        print("="*60)
+        
+        # ✅ 修正：呼叫你檔案中實際定義的函數名稱
+        train_and_save_horizon(h, args)
+
+    print("\n✅ [Log] All horizons trained successfully.")
 
 if __name__ == "__main__":
     args = parse_args()
+    
+    # 建立輸出資料夾
     args.out_dir = Path(args.out_dir)
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
+    # 預設訓練三個時段
     if args.horizons is None:
         args.horizons = [3, 6, 24]
 
     if args.eval_only:
-        # 如果只想測試單一模型
-        main_train_flow(args.horizon, args)
+        # 單獨評估模式
+        print(f"🔍 [Log] Evaluating horizon {args.horizon}h...")
+        train_and_save_horizon(args.horizon, args)
     else:
-        print(f"🚀 [Log] Starting GAGNN v2.0 training: {args.horizons}")
+        # 自動進化模式
+        print(f"🚀 [Log] Starting GAGNN v2.0 evolution: {args.horizons}")
         train_all_horizons(args)
     
     print("\n✅ [Log] Training script finished successfully.")
-    # 這裡絕不放 app.run()，確保 GitHub Action 執行完會自動關閉
+    # ⚠️ 這裡絕對不要放 app.run()，確保 GitHub Action 能正常關閉腳本
