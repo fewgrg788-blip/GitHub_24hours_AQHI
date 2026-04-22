@@ -40,8 +40,8 @@ jobs:
           echo "🚀 [Log] Starting quick test (epochs=1, batch=128)..."
           python train_model.py \
             --csv ./data/ \
-            --epochs 10 \
-            --batch-size 16
+            --epochs 5 \
+            --batch-size 32
           echo "✅ [Log] Quick test training completed!"
 
       - name: 💾 Commit and Push Weights
