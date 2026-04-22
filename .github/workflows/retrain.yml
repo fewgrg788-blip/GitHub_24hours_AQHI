@@ -38,10 +38,13 @@ jobs:
       # 🌟 更新 2: 使用你指定的測試指令
       - name: 🧠 Train GAGNN Model
         run: |
-          echo "🚀 [Log] Starting weekly evolution..."
-          # 注意：目前使用的是測試參數 (2 epochs)。若要上線產生真實高精度模型，建議將 --epochs 拉高。
-          python train_model.py --csv ./data/ --epochs 2 --batch-size 8
-          echo "✅ [Log] Training completed!"
+          echo "🚀 [Log] Starting weekly evolution... (Deep Training Mode)"
+          python train_model.py \
+            --csv ./data/ \
+            --epochs 1 \                  # ← 改成 25（可之後調高到 40）
+            --batch-size 32 \              # ← 加大 batch-size 加快一點
+            --patience 12                  # 早停機制，避免浪費時間
+          echo "✅ [Log] Deep training completed!"
 
       - name: 💾 Commit and Push Weights
         if: success()
