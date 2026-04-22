@@ -618,18 +618,11 @@ def firebase_set_with_retry(ref_path: str, payload: dict, max_retries: int = 3):
 
 def push_to_firebase(firebase_ts: str, display_ts: str, pred_results: dict, source_count: int):
     """
-    Write prediction results to three Firebase locations:
-      GAGNN_v2/predictions/<ts>        — 6h, roadside-key format (HTML dashboard)
-      GAGNN_v3/multi_horizon/<ts>      — 3h / 6h / 24h district format
-      GAGNN_v3/latest                  — pointer to latest timestamp + averages
+    【已修改】只儲存到 GAGNN_v3，並增加預測 log
     """
-    log.info(f"[Firebase] Pushing predictions ts={display_ts} (key={firebase_ts}) …")
+    log.info(f"[Firebase] Pushing predictions ts={display_ts} → GAGNN_v3 ...")
 
-    # v2 (已經使用安全的 V2_KEY_MAP)
-    v2_payload = {V2_KEY_MAP.get(d, d): v for d, v in pred_results[6].items()}
-    firebase_set_with_retry(f"GAGNN_v2/predictions/{firebase_ts}", v2_payload)
-
-    # v3 multi-horizon — 關鍵修正：所有區域名稱都要 sanitise
+    # v3 multi-horizon（主要儲存位置）
     def safe_dict(pred_dict):
         return {sanitize_firebase_key(d): v for d, v in pred_dict.items()}
 
@@ -648,15 +641,28 @@ def push_to_firebase(firebase_ts: str, display_ts: str, pred_results: dict, sour
             "24h": round(float(np.mean(list(pred_results[24].values()))), 2),
         },
     }
+
+    # 1. 儲存完整預測資料
     firebase_set_with_retry(f"GAGNN_v3/multi_horizon/{firebase_ts}", v3_payload)
 
-    # Latest pointer
+    # 2. 更新 latest 指標（前端儀表板會用到）
     firebase_set_with_retry("GAGNN_v3/latest", {
         "timestamp":    display_ts,
         "avg_aqhi_3h":  v3_payload["averages"]["3h"],
         "avg_aqhi_6h":  v3_payload["averages"]["6h"],
         "avg_aqhi_24h": v3_payload["averages"]["24h"],
     })
+
+    # 3. 【新增】儲存預測 log（方便之後查看歷史）
+    log_entry = {
+        "timestamp": display_ts,
+        "horizons": v3_payload["horizons"],
+        "averages": v3_payload["averages"],
+        "source_records": source_count
+    }
+    firebase_set_with_retry(f"GAGNN_v3/logs/{firebase_ts}", log_entry)
+
+    log.info(f"[Firebase] ✅ Successfully saved to GAGNN_v3 (multi_horizon + latest + logs)")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
