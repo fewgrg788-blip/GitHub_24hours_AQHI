@@ -51,6 +51,8 @@ from collections import deque
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+
+import argparse
 import numpy as np
 import pandas as pd
 import joblib
@@ -1330,6 +1332,19 @@ def start_scheduler():
 # MAIN
 # ══════════════════════════════════════════════════════════════════════════════
 # --- 確保 train_model.py 底部只有訓練邏輯，沒有 app.run() ---
+
+def parse_args():
+    p = argparse.ArgumentParser(description="GAGNN v2.0 Training Script")
+    p.add_argument("--csv",        type=str, default="./data/", help="Path to CSV data directory")
+    p.add_argument("--out-dir",    type=str, default="./",      help="Output directory for weights/scalers")
+    p.add_argument("--epochs",     type=int, default=100,       help="Number of training epochs")
+    p.add_argument("--batch-size", type=int, default=32,        help="Batch size")
+    p.add_argument("--lr",         type=float, default=0.001,   help="Learning rate")
+    p.add_argument("--horizons",   type=int, nargs="+",         help="List of horizons to train (e.g. 3 6 24)")
+    p.add_argument("--plot",       action="store_true",         help="Save loss curves as PNG")
+    p.add_argument("--eval-only",  action="store_true",         help="Load saved weights and evaluate only")
+    p.add_argument("--horizon",    type=int, default=6,         help="Single horizon for --eval-only mode")
+    return p.parse_args()
 
 if __name__ == "__main__":
     args = parse_args()
