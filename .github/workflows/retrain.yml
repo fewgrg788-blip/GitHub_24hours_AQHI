@@ -23,44 +23,48 @@ jobs:
           python-version: '3.10'
           cache: 'pip'
 
-      # 🌟 修正 1: PyG 需要特定的安裝順序，否則會找不到 torch 模組
+      # 🌟 更新 1: 直接使用倉庫內的 requirements.txt，確保與 Render 環境 100% 一致
       - name: 📦 Install ML Dependencies
         run: |
-          pip install torch --index-url https://download.pytorch.org/whl/cpu
-          # 安裝 PyG 的必要組件 (CPU 版)
-          pip install torch-scatter torch-sparse torch-cluster torch-spline-conv -f https://data.pyg.org/whl/torch-2.0.0+cpu.html
-          pip install torch-geometric pandas numpy scikit-learn firebase-admin
-          echo "✅ [Log] ML Dependencies installed."
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          echo "✅ [Log] ML Dependencies installed from requirements.txt."
 
-      # 🌟 修正 2: 如果你的訓練腳本需要記錄 Loss 到 Firebase，這步不能省
       - name: 🔑 Create Firebase Service Account Key
         run: |
           echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' > serviceAccountKey.json
           echo "✅ [Log] Firebase Key file created for training logs."
 
+      # 🌟 更新 2: 使用你指定的測試指令
       - name: 🧠 Train GAGNN Model
         run: |
           echo "🚀 [Log] Starting weekly evolution..."
-          # 建議在訓練腳本加入檢查：如果數據量太少則跳過訓練
-          python train_model.py
+          # 注意：目前使用的是測試參數 (2 epochs)。若要上線產生真實高精度模型，建議將 --epochs 拉高。
+          python train_model.py --csv ./data/ --epochs 2 --batch-size 8
           echo "✅ [Log] Training completed!"
 
+      # 🌟 更新 3: 完美對齊 v2.0 的 7 個核心檔案
       - name: 💾 Commit and Push Weights
         if: success()
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           
-          # 同時追蹤模型權重、標準化參數與生成的預測 CSV
-          git add hk_pro_model_best.pth scaler_aqhi.pkl scaler_weather.pkl gagnn_prediction_*.csv
+          # 追蹤 3 個時段的模型、特徵縮放器、圖結構權重
+          git add hk_pro_model_best_3h.pth hk_pro_model_best_6h.pth hk_pro_model_best_24h.pth
+          git add feat_scaler.pkl aqhi_scaler.pkl
+          git add edge_index.pt edge_weight.pt
+          
+          # 處理可能存在的 CSV 更新 (如果有跑預測的話)
+          git add gagnn_prediction_*.csv || true
           
           if git diff --staged --quiet; then
             echo "ℹ️ [Log] No model updates detected."
           else
-            git commit -m "🤖 [AI Evolution] Auto-updated weights & scalars: $(date) [skip ci]"
+            git commit -m "🤖 [AI Evolution] Auto-updated v2.0 weights & scalars: $(date) [skip ci]"
             git pull --rebase origin main
             git push origin main
-            echo "✅ [Log] New weights pushed to repository."
+            echo "✅ [Log] New v2.0 weights pushed to repository."
           fi
 
       - name: 🔔 Trigger Render Deploy
