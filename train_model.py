@@ -1332,14 +1332,31 @@ def start_scheduler():
 # TRAINING ENTRY POINT（GitHub Action 專用）
 # ══════════════════════════════════════════════════════════════════════════════
 
+def parse_args():
+    """解析命令列參數（必須保留，否則會報 NameError）"""
+    p = argparse.ArgumentParser(description="GAGNN v2 — Multi-horizon HK AQHI")
+    p.add_argument("--csv",        default="aqhi_history_2026.csv", help="歷史資料 CSV 路徑")
+    p.add_argument("--out-dir",    default=".", type=Path, help="輸出目錄")
+    p.add_argument("--horizons",   default=None, nargs="+", type=int, help="要訓練的時段 (預設 3 6 24)")
+    p.add_argument("--epochs",     default=150, type=int, help="訓練 epochs")
+    p.add_argument("--batch-size", default=32,  type=int, help="Batch size")
+    p.add_argument("--hidden-dim", default=128, type=int, help="隱藏層維度")
+    p.add_argument("--lr",         default=1e-3, type=float, help="學習率")
+    p.add_argument("--patience",   default=15,   type=int, help="早停 patience")
+    p.add_argument("--plot",       action="store_true", help="儲存 loss 曲線圖")
+    p.add_argument("--eval-only",  action="store_true", help="只載入模型評估")
+    p.add_argument("--horizon",    default=6, type=int, help="評估模式使用的 horizon")
+    return p.parse_args()
+
+
 def train_all_horizons(args):
-    """依序為 3h、6h、24h 執行訓練"""
+    """依序訓練 3h、6h、24h 模型"""
     for h in args.horizons:
         print("\n" + "="*60)
         print(f"🚩 STARTING TRAINING FOR HORIZON: {h}h")
         print("="*60)
         
-        # ✅ 這裡呼叫原本就存在的訓練主函數
+        # ✅ 呼叫原本的訓練主函數（必須存在於檔案前面）
         main_train_flow(h, args)
 
     print("\n✅ [Log] All horizons processed successfully.")
@@ -1356,13 +1373,11 @@ if __name__ == "__main__":
         args.horizons = [3, 6, 24]
 
     if args.eval_only:
-        # 本地測試單一時段用
         print(f"🔍 [Log] Evaluation mode for {args.horizon}h...")
         main_train_flow(args.horizon, args)
     else:
-        # GitHub Action 每週自動訓練
         print(f"🚀 [Log] Starting GAGNN v2.0 evolution: {args.horizons}")
         train_all_horizons(args)
     
     print("\n✅ [Log] Training script finished successfully.")
-    # 重要：絕對不要在這裡加入 app.run()，否則 Action 會卡住
+    # 絕對不要在這裡加入 app.run()！
