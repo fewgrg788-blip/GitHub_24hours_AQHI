@@ -1329,16 +1329,29 @@ def start_scheduler():
 # ══════════════════════════════════════════════════════════════════════════════
 # MAIN
 # ══════════════════════════════════════════════════════════════════════════════
+# --- 確保 train_model.py 底部只有訓練邏輯，沒有 app.run() ---
+
 if __name__ == "__main__":
-    log.info("=" * 65)
-    log.info("  BuildTech GAGNN Prediction Service  v2.0")
-    log.info("  https://buildtech-gnn-service.onrender.com/")
-    log.info("=" * 65)
+    args = parse_args()
+    
+    # 1. 初始化資料夾
+    args.out_dir = Path(args.out_dir)
+    args.out_dir.mkdir(parents=True, exist_ok=True)
 
-    init_firebase()
-    init_models()
-    start_scheduler()
+    if args.horizons is None:
+        args.horizons = ALL_HORIZONS
 
-    port = int(os.environ.get("PORT", 10000))
-    log.info(f"[Flask] Listening on 0.0.0.0:{port}")
-    app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
+    # 2. 執行訓練或評估
+    if args.eval_only:
+        # 如果只是評估
+        h = args.horizon
+        print(f"🚀 [Log] Starting evaluation for horizon {h}h...")
+        # ... 呼叫評估函數 ...
+    else:
+        # 這裡是 GitHub Action 會跑到的地方
+        print(f"🚀 [Log] Starting GAGNN v2.0 training for horizons: {args.horizons}")
+        train_all_horizons(args)
+
+    # ⚠️ 關鍵：跑完後直接退出，不要啟動 Flask 或 Scheduler
+    print("✅ [Log] All training tasks completed. Exiting script...")
+    sys.exit(0)
