@@ -1336,6 +1336,10 @@ def start_scheduler():
 # MAIN EXECUTOR (v2.0 Fixed)
 # ══════════════════════════════════════════════════════════════════════════════
 
+# ══════════════════════════════════════════════════════════════════════════════
+# MAIN EXECUTOR (v2.0 Verified)
+# ══════════════════════════════════════════════════════════════════════════════
+
 def parse_args():
     p = argparse.ArgumentParser(description="GAGNN v2.0 Training Script")
     p.add_argument("--csv",        type=str, default="./data/", help="Path to CSV data directory")
@@ -1350,36 +1354,36 @@ def parse_args():
     return p.parse_args()
 
 def train_all_horizons(args):
-    """主循環：依序訓練 3h, 6h, 24h"""
+    """依序為不同的時間跨度（3h, 6h, 24h）執行訓練流程"""
     for h in args.horizons:
         print("\n" + "="*60)
         print(f"🚩 STARTING TRAINING FOR HORIZON: {h}h")
         print("="*60)
         
-        # ✅ 修正：呼叫你檔案中實際定義的函數名稱
-        train_and_save_horizon(h, args)
+        # ✅ 已修正：呼叫你檔案中第 1195 行定義的 main_train_flow
+        main_train_flow(h, args)
 
-    print("\n✅ [Log] All horizons trained successfully.")
+    print("\n✅ [Log] All horizons processed successfully.")
 
 if __name__ == "__main__":
     args = parse_args()
     
-    # 建立輸出資料夾
+    # 確保輸出目錄存在
     args.out_dir = Path(args.out_dir)
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
-    # 預設訓練三個時段
+    # 如果沒指定，預設訓練全部核心時段
     if args.horizons is None:
         args.horizons = [3, 6, 24]
 
     if args.eval_only:
-        # 單獨評估模式
-        print(f"🔍 [Log] Evaluating horizon {args.horizon}h...")
-        train_and_save_horizon(args.horizon, args)
+        # 單獨評估模式 (通常用於本地測試)
+        print(f"🔍 [Log] Evaluation mode for {args.horizon}h...")
+        main_train_flow(args.horizon, args)
     else:
-        # 自動進化模式
+        # 自動化演化模式 (GitHub Action 使用)
         print(f"🚀 [Log] Starting GAGNN v2.0 evolution: {args.horizons}")
         train_all_horizons(args)
     
     print("\n✅ [Log] Training script finished successfully.")
-    # ⚠️ 這裡絕對不要放 app.run()，確保 GitHub Action 能正常關閉腳本
+    # 確保不會誤啟動 Flask 導致 Action 逾時
