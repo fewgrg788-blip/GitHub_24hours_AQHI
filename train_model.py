@@ -241,7 +241,9 @@ def engineer_features(df: pd.DataFrame):
     9  dow_cos     cos(2π·weekday/7)
     """
     df = df.copy()
-    df["Date"] = pd.to_datetime(df["Date"])
+  
+    # 更彈性的日期解析（支援有秒 / 無秒的格式）
+    df["Date"] = pd.to_datetime(df["Date"], format='mixed', errors='coerce')    
     df = df.sort_values("Date").reset_index(drop=True)
 
     # Cleaning
