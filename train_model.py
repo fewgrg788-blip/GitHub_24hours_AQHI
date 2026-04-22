@@ -1329,9 +1329,8 @@ def start_scheduler():
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# MAIN
+# MAIN EXECUTOR (v2.0 Aligned)
 # ══════════════════════════════════════════════════════════════════════════════
-# --- 確保 train_model.py 底部只有訓練邏輯，沒有 app.run() ---
 
 def parse_args():
     p = argparse.ArgumentParser(description="GAGNN v2.0 Training Script")
@@ -1346,24 +1345,29 @@ def parse_args():
     p.add_argument("--horizon",    type=int, default=6,         help="Single horizon for --eval-only mode")
     return p.parse_args()
 
+def train_all_horizons(args):
+    """迴圈執行 3h, 6h, 24h 的訓練"""
+    for h in args.horizons:
+        print("\n" + "="*50)
+        print(f"🚩 STARTING TRAINING FOR HORIZON: {h}h")
+        print("="*50)
+        # 對齊你檔案中的函數名稱: main_train_flow
+        main_train_flow(h, args) 
+
 if __name__ == "__main__":
-    args = parse_args() # 現在有了這個定義，就不會報錯了
-    
-    # 建立輸出資料夾
+    args = parse_args()
     args.out_dir = Path(args.out_dir)
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
-    # 如果沒有指定 horizons，預設跑全部 (3, 6, 24)
     if args.horizons is None:
         args.horizons = [3, 6, 24]
 
     if args.eval_only:
-        # 評估邏輯...
-        pass
+        # 如果只想測試單一模型
+        main_train_flow(args.horizon, args)
     else:
-        # 執行訓練邏輯
         print(f"🚀 [Log] Starting GAGNN v2.0 training: {args.horizons}")
         train_all_horizons(args)
     
-    print("✅ [Log] Training script finished successfully.")
-    # 這裡絕對不要放 app.run()，否則 GitHub Action 會卡住
+    print("\n✅ [Log] Training script finished successfully.")
+    # 這裡絕不放 app.run()，確保 GitHub Action 執行完會自動關閉
