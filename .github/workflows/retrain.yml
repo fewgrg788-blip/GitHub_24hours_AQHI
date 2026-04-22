@@ -35,16 +35,14 @@ jobs:
           echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' > serviceAccountKey.json
           echo "✅ [Log] Firebase Key file created for training logs."
 
-      # 🌟 更新 2: 使用你指定的測試指令
-      - name: 🧠 Train GAGNN Model
+      - name: 🧠 Train GAGNN Model (Quick Test)
         run: |
-          echo "🚀 [Log] Starting weekly evolution... (Deep Training Mode)"
+          echo "🚀 [Log] Starting quick test (epochs=1, batch=128)..."
           python train_model.py \
             --csv ./data/ \
-            --epochs 1 \                  # ← 改成 25（可之後調高到 40）
-            --batch-size 32 \              # ← 加大 batch-size 加快一點
-            --patience 12                  # 早停機制，避免浪費時間
-          echo "✅ [Log] Deep training completed!"
+            --epochs 1 \
+            --batch-size 128
+          echo "✅ [Log] Quick test training completed!"
 
       - name: 💾 Commit and Push Weights
         if: success()
