@@ -1347,26 +1347,23 @@ def parse_args():
     return p.parse_args()
 
 if __name__ == "__main__":
-    args = parse_args()
+    args = parse_args() # 現在有了這個定義，就不會報錯了
     
-    # 1. 初始化資料夾
+    # 建立輸出資料夾
     args.out_dir = Path(args.out_dir)
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
+    # 如果沒有指定 horizons，預設跑全部 (3, 6, 24)
     if args.horizons is None:
-        args.horizons = ALL_HORIZONS
+        args.horizons = [3, 6, 24]
 
-    # 2. 執行訓練或評估
     if args.eval_only:
-        # 如果只是評估
-        h = args.horizon
-        print(f"🚀 [Log] Starting evaluation for horizon {h}h...")
-        # ... 呼叫評估函數 ...
+        # 評估邏輯...
+        pass
     else:
-        # 這裡是 GitHub Action 會跑到的地方
-        print(f"🚀 [Log] Starting GAGNN v2.0 training for horizons: {args.horizons}")
+        # 執行訓練邏輯
+        print(f"🚀 [Log] Starting GAGNN v2.0 training: {args.horizons}")
         train_all_horizons(args)
-
-    # ⚠️ 關鍵：跑完後直接退出，不要啟動 Flask 或 Scheduler
-    print("✅ [Log] All training tasks completed. Exiting script...")
-    sys.exit(0)
+    
+    print("✅ [Log] Training script finished successfully.")
+    # 這裡絕對不要放 app.run()，否則 GitHub Action 會卡住
