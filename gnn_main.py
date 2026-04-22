@@ -628,7 +628,7 @@ def push_to_firebase(firebase_ts: str, display_ts: str, pred_results: dict, sour
 
     v3_payload = {
         "generated_at":   display_ts,
-        "model_version":  "GAGNN_v2.0",
+        "model_version":  "GAGNN_v3.0",
         "source_records": source_count,
         "horizons": {
             "3h":  safe_dict(pred_results[3]),
