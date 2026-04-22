@@ -1329,41 +1329,21 @@ def start_scheduler():
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# MAIN EXECUTOR (v2.0 Aligned)
+# TRAINING ENTRY POINT（GitHub Action 專用）
 # ══════════════════════════════════════════════════════════════════════════════
-
-# ══════════════════════════════════════════════════════════════════════════════
-# MAIN EXECUTOR (v2.0 Fixed)
-# ══════════════════════════════════════════════════════════════════════════════
-
-# ══════════════════════════════════════════════════════════════════════════════
-# MAIN EXECUTOR (v2.0 Verified)
-# ══════════════════════════════════════════════════════════════════════════════
-
-def parse_args():
-    p = argparse.ArgumentParser(description="GAGNN v2.0 Training Script")
-    p.add_argument("--csv",        type=str, default="./data/", help="Path to CSV data directory")
-    p.add_argument("--out-dir",    type=str, default="./",      help="Output directory for weights/scalers")
-    p.add_argument("--epochs",     type=int, default=100,       help="Number of training epochs")
-    p.add_argument("--batch-size", type=int, default=32,        help="Batch size")
-    p.add_argument("--lr",         type=float, default=0.001,   help="Learning rate")
-    p.add_argument("--horizons",   type=int, nargs="+",         help="List of horizons to train (e.g. 3 6 24)")
-    p.add_argument("--plot",       action="store_true",         help="Save loss curves as PNG")
-    p.add_argument("--eval-only",  action="store_true",         help="Load saved weights and evaluate only")
-    p.add_argument("--horizon",    type=int, default=6,         help="Single horizon for --eval-only mode")
-    return p.parse_args()
 
 def train_all_horizons(args):
-    """依序為不同的時間跨度（3h, 6h, 24h）執行訓練流程"""
+    """依序為 3h、6h、24h 執行訓練"""
     for h in args.horizons:
         print("\n" + "="*60)
         print(f"🚩 STARTING TRAINING FOR HORIZON: {h}h")
         print("="*60)
         
-        # ✅ 已修正：呼叫你檔案中第 1195 行定義的 main_train_flow
+        # ✅ 這裡呼叫原本就存在的訓練主函數
         main_train_flow(h, args)
 
     print("\n✅ [Log] All horizons processed successfully.")
+
 
 if __name__ == "__main__":
     args = parse_args()
@@ -1372,18 +1352,17 @@ if __name__ == "__main__":
     args.out_dir = Path(args.out_dir)
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
-    # 如果沒指定，預設訓練全部核心時段
     if args.horizons is None:
         args.horizons = [3, 6, 24]
 
     if args.eval_only:
-        # 單獨評估模式 (通常用於本地測試)
+        # 本地測試單一時段用
         print(f"🔍 [Log] Evaluation mode for {args.horizon}h...")
         main_train_flow(args.horizon, args)
     else:
-        # 自動化演化模式 (GitHub Action 使用)
+        # GitHub Action 每週自動訓練
         print(f"🚀 [Log] Starting GAGNN v2.0 evolution: {args.horizons}")
         train_all_horizons(args)
     
     print("\n✅ [Log] Training script finished successfully.")
-    # 確保不會誤啟動 Flask 導致 Action 逾時
+    # 重要：絕對不要在這裡加入 app.run()，否則 Action 會卡住
