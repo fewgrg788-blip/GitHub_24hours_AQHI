@@ -43,30 +43,30 @@ jobs:
           python train_model.py --csv ./data/ --epochs 2 --batch-size 8
           echo "✅ [Log] Training completed!"
 
-      # 🌟 更新 3: 完美對齊 v2.0 的 7 個核心檔案
       - name: 💾 Commit and Push Weights
         if: success()
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           
-          # 追蹤 3 個時段的模型、特徵縮放器、圖結構權重
+          # 只加入真正會產生的 7 個核心檔案
           git add hk_pro_model_best_3h.pth hk_pro_model_best_6h.pth hk_pro_model_best_24h.pth
           git add feat_scaler.pkl aqhi_scaler.pkl
           git add edge_index.pt edge_weight.pt
           
-          # 處理可能存在的 CSV 更新 (如果有跑預測的話)
+          # 可選：如果未來有產生預測 CSV 也一起加入（不會報錯）
           git add gagnn_prediction_*.csv || true
           
+          # 如果沒有任何變更就跳過
           if git diff --staged --quiet; then
             echo "ℹ️ [Log] No model updates detected."
           else
             git commit -m "🤖 [AI Evolution] Auto-updated v2.0 weights & scalars: $(date) [skip ci]"
-            git pull --rebase origin main
+            # 使用 --autostash 自動處理衝突（最穩健的方式）
+            git pull --rebase --autostash origin main
             git push origin main
-            echo "✅ [Log] New v2.0 weights pushed to repository."
+            echo "✅ [Log] New v2.0 weights successfully pushed to repository."
           fi
-
       - name: 🔔 Trigger Render Deploy
         if: success()
         run: |
