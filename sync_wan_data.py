@@ -9,17 +9,17 @@ import numpy as np
 import glob
 from datetime import datetime, timedelta, timezone
 
-# ====================== [Configuration] =====================
+# ====================== [配置] =====================
 DATA_DIR = "data"
 if not os.path.exists(DATA_DIR):
     os.makedirs(DATA_DIR)
-    print(f"📁 Data directory created: {DATA_DIR}")
+    print(f"📁 已建立數據資料夾: {DATA_DIR}")
 
-CSV_FILE = "aqhi_history_today.csv"  # This is today's cache, kept in the root directory
-# Annual history file will be: data/aqhi_history_2026.csv
+CSV_FILE = "aqhi_history_today.csv"  # 這是今日快取，維持在根目錄
+# 年度歷史檔案現在會變成: data/aqhi_history_2026.csv
 
 FIREBASE_URL = "https://project-12cc8-default-rtdb.asia-southeast1.firebasedatabase.app/"
-SERVICE_ACCOUNT_PATH = "serviceAccountKey.json"   # If not found, Firebase errors will be ignored
+SERVICE_ACCOUNT_PATH = "serviceAccountKey.json"   # 沒有就忽略 Firebase 錯誤
 
 HKT = timezone(timedelta(hours=8))
 
@@ -27,7 +27,7 @@ AQHI_URL = "https://www.aqhi.gov.hk/epd/ddata/html/out/aqhi_ind_rss_Eng.xml"
 WIND_URL = "https://data.weather.gov.hk/weatherAPI/hko_data/regional-weather/latest_10min_wind_uc.csv"
 WEATHER_JSON_URL = "https://data.weather.gov.hk/weatherAPI/opendata/weather.php?dataType=rhrread&lang=tc"
 
-# ====================== Final Enhanced STATION_MAP ======================
+# ====================== 最終加強版 STATION_MAP ======================
 STATION_MAP = {
     "橫瀾島": "BHD", "長洲": "CCH", "長洲泳灘": "CCB", "中環碼頭": "CP1", "中環": "CP1", "青洲": "GI",
     "赤鱲角": "HKA", "黃竹坑": "HKS", "將軍澳": "JKB", "京士柏": "KP", "南丫島": "LAM",
@@ -39,7 +39,7 @@ STATION_MAP = {
     "香港航海學校": "SSH", "航海學校": "SSH",
     "啟德": "KT", "赤柱": "STAN", "塔門": "TAP",
 
-    # Official latest wind station mappings (April 2026)
+    # 官方最新風速站點精準對應（2026年4月）
     "中環碼頭": "CP1", "赤鱲角": "HKA", "長洲": "CCH", "長洲泳灘": "CCB", "青洲": "GI",
     "香港航海學校": "SSH", "啟德": "KT", "京士柏": "KP", "南丫島": "LAM", "流浮山": "LFS",
     "昂坪": "NGP", "北角": "NP", "坪洲": "PEN", "西貢": "SKG", "沙洲": "SC",
@@ -74,9 +74,9 @@ def wind_text_to_degrees(text):
     return mapping.get(str(text).strip(), 0.0)
 
 def fetch_data():
-    print("\n--- [🔍 API Detection Started] ---")
+    print("\n--- [🔍 API 檢測開始] ---")
     fetched = {}
-    risk_levels = {} # ⬅️ Store level text (e.g., "Very High")
+    risk_levels = {} # ⬅️ 儲存文字等級 (e.g., "Very High")
     vals = {"aqhi": [], "hum": [], "wspd": [], "pdir": []}
 
     # 1. AQHI
@@ -89,17 +89,17 @@ def fetch_data():
             desc = (item.find("description").text or "")
             pure_name = title.split('-')[0].strip().replace("Roadside", "").replace("General Stations", "").strip()
             
-            # 🛠️ Capture number (\d+) and level text ([a-zA-Z\s]+)
+            # 🛠️ 捕捉數字 (\d+) 和 等級文字 ([a-zA-Z\s]+)
             val_match = re.search(r'(\d+)\s+([a-zA-Z\s]+)\s+-', desc, re.IGNORECASE)
             
             if val_match:
                 val = int(val_match.group(1))
-                level_text = val_match.group(2).strip() # Extract level text
+                level_text = val_match.group(2).strip() # 取得等級文字
                 
-                # 1. Create safe name (convert Central/Western to Central_Western)
+                # 1. 建立安全名稱（把 Central/Western 變成 Central_Western）
                 safe_name = pure_name.replace("/", "_")
                 
-                # 2. Store in risk_levels using safe name to avoid Firebase restrictions
+                # 2. 儲存到 risk_levels 使用安全名稱，避開 Firebase 限制
                 risk_levels[safe_name] = level_text
                 
                 key = f"AQHI_{pure_name}"
@@ -108,9 +108,9 @@ def fetch_data():
                     vals["aqhi"].append(val)
                     print(f"✅ [AQHI] {pure_name}: {val} ({level_text})")
     except Exception as e:
-        print(f"❌ AQHI Error: {e}")
+        print(f"❌ AQHI 錯誤: {e}")
 
-    # 2. Wind CSV (precise matching)
+    # 2. Wind CSV（精準匹配）
     try:
         r = requests.get(WIND_URL, timeout=15)
         lines = r.content.decode('utf-8').strip().split('\n')
@@ -134,26 +134,26 @@ def fetch_data():
                     matched = True
                     break
             if not matched:
-                pass # Hide unmatched wind station output for cleanliness
-        print(f"✅ [Wind] Successfully fetched {wind_count} station records")
+                pass # 隱藏未匹配風站印出，保持乾淨
+        print(f"✅ [風力] 已成功抓取 {wind_count} 個站點數據")
     except Exception as e:
-        print(f"❌ Wind Error: {e}")
+        print(f"❌ Wind 錯誤: {e}")
 
-    # 3. Humidity JSON (enhanced: data broadcast)
+    # 3. Humidity JSON (強化版：數據廣播)
     try:
         r = requests.get(WEATHER_JSON_URL)
         data = r.json()
         h_data = data.get('humidity', {}).get('data', [])
         
-        # Get a HK-wide baseline humidity (e.g. 94%)
+        # 獲取一個全港通用的基準濕度 (例如 94%)
         global_hum = h_data[0]['value'] if h_data else 94.0
         
-        # First fill all HUM columns with this baseline
+        # 先用這個基準值填滿所有 HUM 欄位
         for col in ALL_COLUMNS:
             if col.startswith("HUM_"):
                 fetched[col] = float(global_hum)
         
-        # If API provides specific stations, override the baseline
+        # 如果 API 有提供特定站點，再進行覆蓋
         for item in h_data:
             place = item.get('place', '')
             val = float(item.get('value', 0))
@@ -161,48 +161,48 @@ def fetch_data():
             for cn, sid in STATION_MAP.items():
                 if cn in place:
                     fetched[f"HUM_{sid}"] = val
-        print(f"✅ [Humidity Broadcast] Applied baseline humidity {global_hum}% to all monitoring stations")
-    except Exception as e: print(f"❌ Humidity Error: {e}")
+        print(f"✅ [濕度廣播] 已將基準濕度 {global_hum}% 應用於所有濕度監測點")
+    except Exception as e: print(f"❌ Humidity 錯誤: {e}")
 
-    # Compute baselines
+    # 計算基準
     means = {
         "AQHI": round(sum(vals["aqhi"])/len(vals["aqhi"]), 1) if vals["aqhi"] else 3.0,
         "HUM": round(sum(vals["hum"])/len(vals["hum"]), 1) if vals["hum"] else 80.0,
         "WSPD": round(sum(vals["wspd"])/len(vals["wspd"]), 1) if vals["wspd"] else 8.0,
         "PDIR": 225.0
     }
-    print(f"💡 [Baseline] AQHI:{means['AQHI']}, HUM:{means['HUM']}, WSPD:{means['WSPD']}")
+    print(f"💡 [計算基準] AQHI:{means['AQHI']}, HUM:{means['HUM']}, WSPD:{means['WSPD']}")
 
     missing = [col for col in ALL_COLUMNS[1:] if col not in fetched and col != "Cyclone_Present"]
-    print(f"⚠️ {len(missing)} columns still unmatched (expected: mostly HUM_ columns)")
+    print(f"⚠️ 仍有 {len(missing)} 個欄位未匹配（預期：主要是 HUM_ 欄位）")
 
-    return fetched, means, risk_levels # ⬅️ Return risk_levels
+    return fetched, means, risk_levels # ⬅️ 回傳 risk_levels
 
 # ====================== Firebase & run ======================
 if not firebase_admin._apps:
     try:
         cred = credentials.Certificate(SERVICE_ACCOUNT_PATH)
         firebase_admin.initialize_app(cred, {'databaseURL': FIREBASE_URL})
-        print("🔥 Firebase initialized successfully")
+        print("🔥 Firebase 初始化成功")
     except:
-        print("⚠️ Firebase initialization failed (ignorable)")
+        print("⚠️ Firebase 初始化失敗（可忽略）")
 
 def upload_to_firebase(row, timestamp_str):
     try:
         ref = db.reference(f"aqhi_history/{timestamp_str.replace(' ', '_').replace(':', '-')}")
         
-        # 🛠️ Fix 2: Replace "/" with "_" in ALL_COLUMNS keys to avoid Firebase errors
+        # 🛠️ 修復 2：將 ALL_COLUMNS 裡面的 "/" 替換成 "_"，避免 Firebase 報錯
         safe_keys = [k.replace("/", "_") for k in ALL_COLUMNS]
         data_dict = dict(zip(safe_keys, row))
         
         ref.set(data_dict)
-        print(f"✅ Firebase historical data uploaded → {timestamp_str}")
+        print(f"✅ Firebase 歷史數據上傳成功 → {timestamp_str}")
     except Exception as e:
-        print(f"⚠️ Firebase historical data upload failed: {e} (ignorable)")
+        print(f"⚠️ Firebase 歷史數據上傳失敗: {e}（可忽略）")
 
 def save_aqhi_levels_to_firebase(risk_levels, timestamp_str):
     """
-    Saves district risk level text to GAGNN_24hours/GAGNN_data/readings
+    專門儲存各區風險等級文字到 GAGNN_24hours/GAGNN_data/readings
     """
     if not risk_levels:
         return
@@ -213,40 +213,40 @@ def save_aqhi_levels_to_firebase(risk_levels, timestamp_str):
             "station_levels": risk_levels
         }
         ref.set(data_to_save)
-        print(f"✅ AQHI risk level text synced to: GAGNN_24hours/GAGNN_data/readings")
+        print(f"✅ AQHI 風險等級文字已同步至: GAGNN_24hours/GAGNN_data/readings")
     except Exception as e:
-        print(f"⚠️ Failed to sync risk level text: {e}")
+        print(f"⚠️ 無法同步風險等級文字: {e}")
 
 def auto_wash_csv(file_path):
     if not os.path.exists(file_path):
         return
     try:
-        # 1. Read and fix date format
+        # 1. 讀取並修正時間格式
         df = pd.read_csv(file_path)
         df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
         df = df.dropna(subset=['Date'])
         
-        # 2. Normalise to the hour (e.g. 16:44 -> 16:00) and remove duplicates (keep last)
+        # 2. 正規化為整點 (例如 16:44 -> 16:00)，並去除重複（保留最後一筆）
         df['Date'] = df['Date'].dt.floor('h')
         df = df.drop_duplicates(subset=['Date'], keep='last').set_index('Date')
         
-        # 3. Fill in missing hours (build complete time axis)
+        # 3. 補齊缺失的小時 (建立完整的時間軸)
         full_range = pd.date_range(start=df.index.min(), end=df.index.max(), freq='h')
         df = df.reindex(full_range)
         
-        # 4. Smart interpolation (infer missing values from surrounding data to avoid gaps)
+        # 4. 智能插值 (用前後數據推算中間的缺失值，避免斷層)
         df = df.interpolate(method='linear', limit_direction='both')
         
-        # 5. Value constraint: AQHI must be between 1-11 and rounded to integer
+        # 5. 數值約束：AQHI 必須在 1-11 之間，且四捨五入為整數
         aqhi_cols = [c for c in df.columns if 'AQHI' in c]
         df[aqhi_cols] = df[aqhi_cols].clip(1, 11).round(0)
         
-        # 6. Write back to CSV
+        # 6. 回寫 CSV
         df.index.name = 'Date'
         df.reset_index().to_csv(file_path, index=False, date_format='%Y-%m-%d %H:00')
-        print(f"✨ [Auto Wash] CSV cleaned, filled, and aligned to the hour")
+        print(f"✨ [Auto Wash] CSV 已完成清洗、補齊與整點對齊")
     except Exception as e:
-        print(f"⚠️ Auto Wash failed: {e}")
+        print(f"⚠️ Auto Wash 失敗: {e}")
 
 
 def fill_missing_hours_before_run(file_path):
@@ -259,15 +259,15 @@ def fill_missing_hours_before_run(file_path):
         df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
         df = df.dropna(subset=['Date'])
         
-        # Remove timezone for comparison
+        # 移除時區進行比較
         last_date = df['Date'].max().replace(tzinfo=None)
         now_hkt = datetime.now(HKT).replace(minute=0, second=0, microsecond=0, tzinfo=None)
         
         if last_date < now_hkt - timedelta(hours=1):
-            print(f"⚠️ Data gap detected! Last record: {last_date}, current time: {now_hkt}.")
+            print(f"⚠️ 發現數據斷層！最後記錄: {last_date}, 目前時間: {now_hkt}。")
             
             target_end = now_hkt - timedelta(hours=1)
-            # Ensure no timezone when building index
+            # 建立索引時也確保無時區
             df = df.set_index('Date')
             df.index = df.index.tz_localize(None) 
             
@@ -279,9 +279,9 @@ def fill_missing_hours_before_run(file_path):
             
             df.index.name = 'Date'
             df.reset_index().to_csv(file_path, index=False, date_format='%Y-%m-%d %H:00')
-            print(f"✅ Gap filled successfully")
+            print(f"✅ 補齊成功")
     except Exception as e:
-        print(f"⚠️ Startup gap-fill check failed: {e}")
+        print(f"⚠️ 啟動檢查補齊失敗: {e}")
 
 
 def run():
@@ -302,9 +302,9 @@ def run():
             elif "PDIR" in col: row.append(means["PDIR"])
             else: row.append(0.0)
 
-    # --- [Feature 1: Append to annual history file (path changed to data/)] ---
+    # --- [功能一：追加至年度歷史檔案 (已更改路徑至 data/)] ---
     current_year = now.strftime("%Y")
-    # Change: path now includes DATA_DIR
+    # 修改處：路徑加入 DATA_DIR
     annual_history_file = os.path.join(DATA_DIR, f"aqhi_history_{current_year}.csv")
     
     history_exists = os.path.isfile(annual_history_file)
@@ -312,9 +312,9 @@ def run():
         if not history_exists:
             f.write(",".join(ALL_COLUMNS) + "\n")
         f.write(",".join(map(str, row)) + "\n")
-    print(f"📦 Data synced to annual file: {annual_history_file}")
+    print(f"📦 數據已同步至年度檔案: {annual_history_file}")
 
-    # --- [Feature 2: Update today's cache and remove outdated data] ---
+    # --- [功能二：更新今日快取 並清理昨日數據] ---
     file_exists = os.path.isfile(CSV_FILE)
     with open(CSV_FILE, "a", encoding="utf-8") as f:
         if not file_exists:
@@ -327,22 +327,22 @@ def run():
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         df_filtered = df_today[df_today['Date'] >= today_start.replace(tzinfo=None)]
         df_filtered.to_csv(CSV_FILE, index=False, date_format='%Y-%m-%d %H:00')
-        print(f"🧹 Today's cache {CSV_FILE} cleaned of outdated data")
+        print(f"掃 今日快取 {CSV_FILE} 已清理過期數據")
     except Exception as e:
-        print(f"⚠️ Cache cleanup failed: {e}")
+        print(f"⚠️ 清理快取失敗: {e}")
 
-    # Firebase sync
+    # Firebase 同步
     upload_to_firebase(row, timestamp_str)
     save_aqhi_levels_to_firebase(risk_levels, timestamp_str)
 
 def get_full_history_dataframe():
     """
-    Automatically reads and merges all aqhi_history_20*.csv files from data/ directory
+    自動抓取 data/ 目錄下所有的 aqhi_history_20*.csv 並合併
     """
-    # Change: search within data directory
+    # 修改處：在 data 目錄下搜尋
     search_path = os.path.join(DATA_DIR, "aqhi_history_20*.csv")
     all_files = sorted(glob.glob(search_path))
-    print(f"📚 Reading and merging annual files: {all_files}")
+    print(f"📚 正在讀取並合併以下年度檔案: {all_files}")
     
     df_list = []
     for filename in all_files:
@@ -356,23 +356,23 @@ def get_full_history_dataframe():
     full_df = full_df.sort_values('Date')
     return full_df
 
-# Recommended to encapsulate this, or ensure it is called before run()
+# 建議將這段確保目錄存在的代碼封裝，或確保它在 run() 之前被調用
 def ensure_directories():
     if not os.path.exists(DATA_DIR):
         os.makedirs(DATA_DIR, exist_ok=True)
-        print(f"📁 Data directory confirmed: {DATA_DIR}")
+        print(f"📁 已確保數據資料夾存在: {DATA_DIR}")
 
 if __name__ == "__main__":
-    ensure_directories() # Force check
+    ensure_directories() # 強制檢查
     
     current_year = datetime.now(HKT).strftime("%Y")
     target_annual_file = os.path.join(DATA_DIR, f"aqhi_history_{current_year}.csv")
 
-    # 1. Fill data gaps
+    # 1. 補齊數據斷層
     fill_missing_hours_before_run(target_annual_file)
     
-    # 2. Run fetch
+    # 2. 執行抓取
     run()
     
-    # 3. Clean file
+    # 3. 清洗檔案
     auto_wash_csv(target_annual_file)
